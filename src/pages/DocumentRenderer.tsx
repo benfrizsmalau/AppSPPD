@@ -1,609 +1,711 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { format } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
-import { Printer, ArrowLeft, FileText, Loader2 } from 'lucide-react';
+import { Printer, ArrowLeft, FileText, Loader2, Hash } from 'lucide-react';
+import type { SPT, SPPD, Pegawai, Penandatangan, DasarPerintah } from '../types';
 
-const DocumentRenderer: React.FC = () => {
-    const { type, id } = useParams();
-    const navigate = useNavigate();
-    const [data, setData] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatNamaLengkap(p: Partial<Pegawai> | Partial<Penandatangan> | null | undefined): string {
+  if (!p) return '—';
+  const { gelar_depan, nama_lengkap, gelar_belakang } = p as {
+    gelar_depan?: string; nama_lengkap: string; gelar_belakang?: string;
+  };
+  return [gelar_depan, nama_lengkap, gelar_belakang].filter(Boolean).join(' ');
+}
 
-    useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            try {
-                if (type === 'spt') {
-                    const { data: spt, error } = await supabase
-                        .from('spt')
-                        .select(`
-                            *,
-                            instansi:instansi(*),
-                            penandatangan:penandatangan(*, pangkat:ref_pangkat(*)),
-                            pegawai_list:spt_pegawai(
-                                *,
-                                pegawai:pegawai(*, pangkat:ref_pangkat(*), golongan:ref_golongan(*))
-                            )
-                        `)
-                        .eq('id', id)
-                        .single();
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return '—';
+  try { return format(new Date(d), 'dd MMMM yyyy', { locale: localeID }); } catch { return d; }
+}
 
-                    if (error) throw error;
-                    setData(spt);
-                } else if (type === 'sppd') {
-                    const { data: sppd, error } = await supabase
-                        .from('sppd')
-                        .select(`
-                            *,
-                            instansi:instansi(*),
-                            penandatangan:penandatangan(*, pangkat:ref_pangkat(*)),
-                            pegawai:pegawai!pegawai_id(*, pangkat:ref_pangkat(*), golongan:ref_golongan(*)),
-                            pejabat_pemberi_perintah:pegawai!pejabat_pemberi_perintah_id(*, pangkat:ref_pangkat(*), golongan:ref_golongan(*)),
-                            spt:spt(*),
-                            tingkat_biaya:ref_tingkat_perjalanan!tingkat_biaya_id(*),
-                            moda_transportasi:ref_alat_angkut!alat_angkut_id(*),
-                            pengikut:sppd_pengikut(
-                                *,
-                                pegawai:pegawai!pegawai_id(*, pangkat:ref_pangkat(*), golongan:ref_golongan(*))
-                            )
-                        `)
-                        .eq('id', id)
-                        .single();
+const ROMAN_MONTHS = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'];
+export function fmtDateRoman(d: string | null | undefined): string {
+  if (!d) return '—';
+  try {
+    const dt = new Date(d);
+    return `${dt.getDate()} ${ROMAN_MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
+  } catch { return d ?? '—'; }
+}
 
-                    if (error) throw error;
-                    setData(sppd);
-                }
-            } catch (error) {
-                console.error('Error fetching document:', error);
-            }
-            setLoading(false);
-        };
+// ─── KOP SURAT ────────────────────────────────────────────────────────────────
+interface KopSuratProps {
+  instansi: SPT['instansi'] | SPPD['instansi'];
+}
+const KopSurat: React.FC<KopSuratProps> = ({ instansi }) => (
+  <div style={{ display: 'flex', alignItems: 'stretch', borderBottom: '4px double #000', paddingBottom: '6px', marginBottom: '14px' }}>
+    <div style={{ width: '85px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {instansi?.logo_kabupaten_path
+        ? <img src={instansi.logo_kabupaten_path} alt="Logo Kab" style={{ width: '70px', height: 'auto', objectFit: 'contain' }} />
+        : <div style={{ width: 70, height: 70, background: '#f1f5f9', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9pt', color: '#94a3b8' }}>Logo Kab</div>}
+    </div>
+    <div style={{ flex: 1, textAlign: 'center', padding: '0 8px', fontFamily: '"Times New Roman", Times, serif' }}>
+      <p style={{ margin: 0, fontSize: '12pt', fontWeight: 'bold', lineHeight: 1.2 }}>
+        PEMERINTAH {instansi?.kabupaten_kota ? `KABUPATEN ${instansi.kabupaten_kota.toUpperCase()}` : ''}
+      </p>
+      <p style={{ margin: '3px 0 0', fontSize: '15pt', fontWeight: 'bold', lineHeight: 1.2 }}>
+        {instansi?.nama_lengkap?.toUpperCase() ?? ''}
+      </p>
+      {instansi?.alamat && <p style={{ margin: '2px 0 0', fontSize: '9pt', lineHeight: 1.3, color: '#333' }}>{instansi.alamat}</p>}
+      {(instansi?.telepon || instansi?.email) && (
+        <p style={{ margin: 0, fontSize: '8pt', color: '#444' }}>
+          {instansi.telepon && `Telp. ${instansi.telepon}`}
+          {instansi.telepon && instansi.email && ' | '}
+          {instansi.email && `Email: ${instansi.email}`}
+          {instansi?.kode_pos && ` | Kode Pos: ${instansi.kode_pos}`}
+        </p>
+      )}
+    </div>
+    <div style={{ width: '85px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {instansi?.logo_path
+        ? <img src={instansi.logo_path} alt="Logo SKPD" style={{ width: '70px', height: 'auto', objectFit: 'contain' }} />
+        : <div style={{ width: 70, height: 70, background: '#f1f5f9', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9pt', color: '#94a3b8' }}>Logo</div>}
+    </div>
+  </div>
+);
 
-        fetchData();
-    }, [type, id]);
+// ─── Signature Block ──────────────────────────────────────────────────────────
+interface SignatureBlockProps {
+  label?: string;
+  place: string;
+  date: string;
+  penandatangan: Penandatangan | null | undefined;
+}
+const SignatureBlock: React.FC<SignatureBlockProps> = ({ label, place, date, penandatangan }) => (
+  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px', pageBreakInside: 'avoid' }}>
+    <div style={{ width: '320px', textAlign: 'center', fontFamily: '"Times New Roman", Times, serif' }}>
+      <p style={{ margin: 0, fontSize: '11pt' }}>{label ?? 'Ditetapkan di'} : {place}</p>
+      <p style={{ margin: '2px 0 0', fontSize: '11pt' }}>Pada tanggal : {fmtDate(date)}</p>
+      <p style={{ margin: '10px 0 0', fontSize: '11pt', fontWeight: 'bold' }}>{penandatangan?.jabatan ?? ''}</p>
+      <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {penandatangan?.ttd_digital_path && (
+          <img src={penandatangan.ttd_digital_path} alt="TTD" style={{ height: '62px', mixBlendMode: 'multiply', objectFit: 'contain' }} />
+        )}
+      </div>
+      <p style={{ margin: 0, fontSize: '11.5pt', fontWeight: 'bold', textDecoration: 'underline' }}>{formatNamaLengkap(penandatangan)}</p>
+      {penandatangan?.ref_pangkat && <p style={{ margin: 0, fontSize: '10.5pt' }}>{penandatangan.ref_pangkat.nama}</p>}
+      <p style={{ margin: 0, fontSize: '10.5pt' }}>NIP. {penandatangan?.nip ?? ''}</p>
+    </div>
+  </div>
+);
 
-    const handlePrint = () => {
-        window.print();
-    };
+// ─── DRAFT Watermark ──────────────────────────────────────────────────────────
+const DraftWatermark = () => (
+  <div style={{
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    pointerEvents: 'none', zIndex: 5, overflow: 'hidden',
+  }}>
+    <p style={{
+      fontSize: '100pt', fontWeight: 900, color: 'rgba(220,38,38,0.12)',
+      transform: 'rotate(-45deg)', whiteSpace: 'nowrap',
+      fontFamily: '"Times New Roman", Times, serif', letterSpacing: '6px',
+    }}>DRAFT</p>
+  </div>
+);
 
-    const formatNamaPenuh = (pegawai: any) => {
-        if (!pegawai) return '-';
-        const { gelar_depan, nama_lengkap, gelar_belakang } = pegawai;
-        let pName = nama_lengkap;
-        if (gelar_depan) pName = `${gelar_depan} ${pName}`;
-        if (gelar_belakang) pName = `${pName}, ${gelar_belakang}`;
-        return pName;
-    };
+// ─── SPT Document ─────────────────────────────────────────────────────────────
+const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
+  const isDraft = data.status === 'Draft';
+  const pegawaiList = data.spt_pegawai ?? [];
 
-    if (loading) {
-        return (
-            <div className="preview-loading">
-                <Loader2 className="spin" size={48} color="var(--p-accent)" />
-                <p>Mempersiapkan Pratinjau Dokumen...</p>
-            </div>
-        );
-    }
+  return (
+    <div style={{ position: 'relative' }}>
+      {isDraft && <DraftWatermark />}
+      <KopSurat instansi={data.instansi} />
 
-    if (!data) {
-        return (
-            <div className="preview-error">
-                <FileText size={64} color="var(--p-text-muted)" />
-                <h3>Dokumen Tidak Ditemukan</h3>
-                <p>Pastikan ID dokumen benar atau hubungi administrator.</p>
-                <button onClick={() => navigate(-1)} className="btn btn-primary">
-                    <ArrowLeft size={18} /> Kembali
-                </button>
-            </div>
-        );
-    }
-
-    const renderSppdBelakang = () => {
-        return (
-            <div className="sppd-belakang">
-                <table className="sppd-back-table">
-                    <tbody>
-                        <tr>
-                            <td width="50%" className="no-padding">
-                                <table className="inner-back-table">
-                                    <tbody>
-                                        <tr><td width="30">I.</td><td>Berangkat dari</td><td>: {data.tempat_berangkat}</td></tr>
-                                        <tr><td></td><td>Ke</td><td>: {data.tempat_tujuan}</td></tr>
-                                        <tr><td></td><td>Pada tanggal</td><td>: {data.tanggal_berangkat ? format(new Date(data.tanggal_berangkat), 'dd MMMM yyyy', { locale: localeID }) : '-'}</td></tr>
-                                        <tr><td></td><td>Kepala</td><td>: {data.instansi?.nama_singkat}</td></tr>
-                                        <tr style={{ height: '80px' }}><td></td><td colSpan={2}></td></tr>
-                                        <tr><td></td><td colSpan={2} align="center"><strong><u>{formatNamaPenuh(data.penandatangan)}</u></strong><br />{data.penandatangan?.pangkat?.nama}<br />NIP. {data.penandatangan?.nip}</td></tr>
-                                    </tbody>
-                                </table>
-                            </td>
-                            <td width="50%" className="no-padding"></td>
-                        </tr>
-                        <tr>
-                            <td className="no-padding">
-                                <table className="inner-back-table">
-                                    <tbody>
-                                        <tr><td width="30">II.</td><td>Tiba di</td><td>: {data.tempat_tujuan}</td></tr>
-                                        <tr><td></td><td>Pada tanggal</td><td>: {data.tanggal_berangkat ? format(new Date(data.tanggal_berangkat), 'dd MMMM yyyy', { locale: localeID }) : '-'}</td></tr>
-                                        <tr><td></td><td>Kepala</td><td>: </td></tr>
-                                        <tr style={{ height: '80px' }}><td></td><td colSpan={2}></td></tr>
-                                        <tr><td></td><td colSpan={2}>(...................................................)</td></tr>
-                                    </tbody>
-                                </table>
-                            </td>
-                            <td className="no-padding">
-                                <table className="inner-back-table">
-                                    <tbody>
-                                        <tr><td>Berangkat dari</td><td>: {data.tempat_tujuan}</td></tr>
-                                        <tr><td>Ke</td><td>: {data.tempat_berangkat}</td></tr>
-                                        <tr><td>Pada tanggal</td><td>: {data.tanggal_kembali ? format(new Date(data.tanggal_kembali), 'dd MMMM yyyy', { locale: localeID }) : '-'}</td></tr>
-                                        <tr><td>Kepala</td><td>: </td></tr>
-                                        <tr style={{ height: '80px' }}><td colSpan={2}></td></tr>
-                                        <tr><td colSpan={2}>(...................................................)</td></tr>
-                                    </tbody>
-                                </table>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td className="no-padding">
-                                <table className="inner-back-table">
-                                    <tbody>
-                                        <tr><td width="30">III.</td><td>Tiba di</td><td>: </td></tr>
-                                        <tr><td></td><td>Pada tanggal</td><td>: </td></tr>
-                                        <tr><td></td><td>Kepala</td><td>: </td></tr>
-                                        <tr style={{ height: '80px' }}><td></td><td colSpan={2}></td></tr>
-                                        <tr><td></td><td colSpan={2}>(...................................................)</td></tr>
-                                    </tbody>
-                                </table>
-                            </td>
-                            <td className="no-padding">
-                                <table className="inner-back-table">
-                                    <tbody>
-                                        <tr><td>Berangkat dari</td><td>: </td></tr>
-                                        <tr><td>Ke</td><td>: </td></tr>
-                                        <tr><td>Pada tanggal</td><td>: </td></tr>
-                                        <tr><td>Kepala</td><td>: </td></tr>
-                                        <tr style={{ height: '80px' }}><td colSpan={2}></td></tr>
-                                        <tr><td colSpan={2}>(...................................................)</td></tr>
-                                    </tbody>
-                                </table>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td className="no-padding">
-                                <table className="inner-back-table">
-                                    <tbody>
-                                        <tr><td width="30">IV.</td><td>Tiba kembali di</td><td>: {data.tempat_berangkat}</td></tr>
-                                        <tr><td></td><td>Pada tanggal</td><td>: {data.tanggal_kembali ? format(new Date(data.tanggal_kembali), 'dd MMMM yyyy', { locale: localeID }) : '-'}</td></tr>
-                                        <tr><td></td><td colSpan={2} align="center" className="signature-title">{data.penandatangan?.jabatan || 'Pejabat Pembuat Komitmen'}:</td></tr>
-                                        <tr style={{ height: '80px' }}><td></td><td colSpan={2}></td></tr>
-                                        <tr><td></td><td colSpan={2} align="center"><strong><u>{formatNamaPenuh(data.penandatangan)}</u></strong><br />{data.penandatangan?.pangkat?.nama}<br />NIP. {data.penandatangan?.nip}</td></tr>
-                                    </tbody>
-                                </table>
-                            </td>
-                            <td className="no-padding" style={{ verticalAlign: 'top', padding: '10px' }}>
-                                <p style={{ fontSize: '10pt' }}>Telah diperiksa, dengan keterangan bahwa perjalanan tersebut di atas benar dilakukan atas perintahnya dan semata-mata untuk kepentingan jabatan dalam waktu yang sesingkat-singkatnya.</p>
-                                <div style={{ marginTop: '20px', textAlign: 'center' }}>
-                                    <p className="signature-title">{data.penandatangan?.jabatan || 'Pejabat Pembuat Komitmen'}:</p>
-                                    <div style={{ height: '80px' }}></div>
-                                    <p><strong><u>{formatNamaPenuh(data.penandatangan)}</u></strong><br />{data.penandatangan?.pangkat?.nama}<br />NIP. {data.penandatangan?.nip}</p>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td colSpan={2} style={{ padding: '15px' }}>
-                                <strong>V. CATATAN LAIN-LAIN</strong>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td colSpan={2} style={{ padding: '15px' }}>
-                                <strong>VI. PERHATIAN</strong>
-                                <p style={{ fontSize: '9pt', marginTop: '5px' }}>Pejabat yang berwenang menerbitkan SPPD, pegawai yang melakukan perjalanan dinas, para pejabat yang mengesahkan tanggal berangkat/tiba serta Bendaharawan bertanggung jawab berdasarkan peraturan-peraturan Keuangan Negara apabila Negara mendapat rugi akibat kesalahan, kealpaan dan kealpaannya.</p>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        );
-    };
-
-    const renderKopSurat = () => {
-        // Special logic for SPT dynamic headers
-        if (type === 'spt' && data.header_style !== 'SKPD') {
-            if (data.header_style === 'Bupati') {
-                return (
-                    <div className="kop-surat kop-bupati">
-                        <div className="kop-logo-center">
-                            {data.instansi?.logo_kabupaten_path && <img src={data.instansi.logo_kabupaten_path} alt="Logo Kab" />}
-                        </div>
-                        <div className="kop-text centered">
-                            <h1 className="bupati">BUPATI {data.instansi?.kabupaten_kota?.toUpperCase()}</h1>
-                        </div>
-                        <div className="kop-border thicker"></div>
-                    </div>
-                );
-            }
-            if (data.header_style === 'Sekda') {
-                return (
-                    <div className="kop-surat kop-sekda">
-                        <div className="kop-logo-left">
-                            {data.instansi?.logo_kabupaten_path && <img src={data.instansi.logo_kabupaten_path} alt="Logo Kab" />}
-                        </div>
-                        <div className="kop-text">
-                            <h2 className="pemkab">PEMERINTAH KABUPATEN {data.instansi?.kabupaten_kota?.toUpperCase()}</h2>
-                            <h1 className="sekda">SEKRETARIAT DAERAH</h1>
-                            <p className="alamat">{data.instansi?.alamat}</p>
-                            <div className="kop-border"></div>
-                        </div>
-                    </div>
-                );
-            }
-        }
-
-        // Standard SKPD Header (Dinas)
-        return (
-            <div className="kop-surat">
-                <div className="kop-logo-left">
-                    {data.instansi?.logo_kabupaten_path && <img src={data.instansi.logo_kabupaten_path} alt="Logo Kab" />}
-                </div>
-                <div className="kop-text">
-                    <h2 className="pemkab">PEMERINTAH KABUPATEN {data.instansi?.kabupaten_kota?.toUpperCase()}</h2>
-                    <h1 className="dinas">{data.instansi?.nama_lengkap?.toUpperCase()}</h1>
-                    <p className="alamat">{data.instansi?.alamat}</p>
-                    <div className="kontak">
-                        {data.instansi?.telepon && <span>Telp. {data.instansi.telepon} </span>}
-                        {data.instansi?.kode_pos && <span>KODEPOS {data.instansi.kode_pos} </span>}
-                    </div>
-                    <div className="kontak">
-                        {data.instansi?.email && <span>Email: {data.instansi.email} </span>}
-                        {data.instansi?.website && <span>Website: {data.instansi.website}</span>}
-                    </div>
-                </div>
-                <div className="kop-logo-right">
-                    {data.instansi?.logo_path && <img src={data.instansi.logo_path} alt="Logo SKPD" />}
-                </div>
-                <div className="kop-border"></div>
-            </div>
-        );
-    };
-
-    return (
-        <div className="doc-preview-page">
-            <div className="preview-toolbar no-print">
-                <div className="toolbar-left">
-                    <button onClick={() => navigate(-1)} className="toolbar-btn" title="Kembali">
-                        <ArrowLeft size={18} />
-                    </button>
-                    <div className="toolbar-title">
-                        <FileText size={18} />
-                        <span>Pratinjau {type === 'spt' ? 'SPT' : 'SPPD'}</span>
-                    </div>
-                </div>
-                <div className="toolbar-right">
-                    <button onClick={handlePrint} className="btn-print-premium">
-                        <Printer size={18} />
-                        Cetak Dokumen
-                    </button>
-                </div>
-            </div>
-
-            <div className="scroll-area">
-                <div className="print-container">
-                    {type === 'spt' ? (
-                        <div className="spt-official">
-                            {renderKopSurat()}
-                            <div className="doc-content-body">
-                                <div className="doc-title-section">
-                                    <h3 className="underline">SURAT PERINTAH TUGAS</h3>
-                                    <p>Nomor : {data.nomor_spt}</p>
-                                </div>
-
-                                <div className="doc-main-sections">
-                                    <table className="borderless-table">
-                                        <tbody>
-                                            <tr>
-                                                <td width="90" valign="top">Dasar :</td>
-                                                <td>
-                                                    {Array.isArray(data.dasar_perintah) ? (
-                                                        <ol className="tujuan-ol" style={{ paddingLeft: '20px', margin: 0 }}>
-                                                            {data.dasar_perintah.map((d: string, idx: number) => (
-                                                                <li key={idx}>{d}</li>
-                                                            ))}
-                                                        </ol>
-                                                    ) : data.dasar_perintah}
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-
-                                    <div className="commands-header">
-                                        <h4>M E M E R I N T A H K A N :</h4>
-                                    </div>
-
-                                    <table className="borderless-table">
-                                        <tbody>
-                                            <tr>
-                                                <td width="90" valign="top">Kepada :</td>
-                                                <td>
-                                                    {data.pegawai_list?.map((pl: any, idx: number) => (
-                                                        <div key={idx} className="pegawai-item">
-                                                            <div className="pegawai-num">{idx + 1}.</div>
-                                                            <div className="pegawai-details">
-                                                                <table className="inner-data-table">
-                                                                    <tbody>
-                                                                        <tr><td width="70">Nama</td><td>:</td><td><strong>{formatNamaPenuh(pl.pegawai)}</strong></td></tr>
-                                                                        <tr><td>NIP</td><td>:</td><td>{pl.pegawai?.nip}</td></tr>
-                                                                        <tr><td>Pangkat</td><td>:</td><td>{pl.pegawai?.pangkat?.nama} / {pl.pegawai?.golongan?.nama}</td></tr>
-                                                                        <tr><td>Jabatan</td><td>:</td><td>{pl.pegawai?.jabatan}</td></tr>
-                                                                    </tbody>
-                                                                </table>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </td>
-                                            </tr>
-                                            <tr style={{ height: '15px' }}></tr>
-                                            <tr>
-                                                <td width="90" valign="top">Untuk :</td>
-                                                <td>
-                                                    <ol className="tujuan-ol">
-                                                        {data.tujuan_kegiatan?.map((t: string, idx: number) => (
-                                                            <li key={idx}>{t}</li>
-                                                        ))}
-                                                    </ol>
-                                                </td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                <div className="signature-area">
-                                    <div className="signature-box">
-                                        <p>Ditetapkan di : {data.tempat_penetapan}</p>
-                                        <p>Pada tanggal : {data.tanggal_penetapan ? format(new Date(data.tanggal_penetapan), 'dd MMMM yyyy', { locale: localeID }) : '-'}</p>
-                                        <div className="sign-role">
-                                            <strong>{data.penandatangan?.jabatan}</strong>
-                                        </div>
-                                        <div className="sign-space">
-                                            {data.penandatangan?.ttd_digital_path && (
-                                                <img src={data.penandatangan.ttd_digital_path} alt="TTD" />
-                                            )}
-                                        </div>
-                                        <div className="sign-name">
-                                            <strong><u>{formatNamaPenuh(data.penandatangan)}</u></strong>
-                                            <p>{data.penandatangan?.pangkat?.nama}</p>
-                                            <p>NIP. {data.penandatangan?.nip}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="sppd-official">
-                            <div className="print-page">
-                                {renderKopSurat()}
-                                <div className="doc-content-body">
-                                    <div className="doc-title-section">
-                                        <h3 className="underline">SURAT PERJALANAN DINAS (SPPD)</h3>
-                                        <p>Nomor : {data.nomor_sppd}</p>
-                                    </div>
-
-                                    <table className="sppd-grid-table">
-                                        <tbody>
-                                            <tr><td width="45" align="center">1.</td><td width="215">Pejabat Pemberi Perintah</td><td>{data.pejabat_pemberi_perintah?.jabatan || data.pejabat_pemberi_perintah_id}</td></tr>
-                                            <tr><td align="center">2.</td><td>Nama Pegawai yang diperintah</td><td><strong>{formatNamaPenuh(data.pegawai)}</strong></td></tr>
-                                            <tr><td align="center">3.</td><td>a. Pangkat dan Golongan<br />b. Jabatan / Instansi<br />c. Tingkat Biaya Perjalanan Dinas</td><td>a. {data.pegawai?.pangkat?.nama} / {data.pegawai?.golongan?.nama}<br />b. {data.pegawai?.jabatan} / {data.instansi?.nama_singkat}<br />c. {data.tingkat_biaya?.kode || data.tingkat_perjalanan}</td></tr>
-                                            <tr><td align="center">4.</td><td>Maksud Perjalanan Dinas</td><td>{data.maksud_perjalanan}</td></tr>
-                                            <tr><td align="center">5.</td><td>Alat angkut yang dipergunakan</td><td>{data.moda_transportasi?.nama || data.alat_angkut}</td></tr>
-                                            <tr><td align="center">6.</td><td>a. Tempat berangkat<br />b. Tempat tujuan</td><td>a. {data.tempat_berangkat}<br />b. {data.tempat_tujuan}</td></tr>
-                                            <tr><td align="center">7.</td><td>a. Lamanya Perjalanan Dinas<br />b. Tanggal berangkat<br />c. Tanggal harus kembali</td><td>a. {data.lama_perjalanan} (hari)<br />b. {data.tanggal_berangkat ? format(new Date(data.tanggal_berangkat), 'dd MMMM yyyy', { locale: localeID }) : '-'}<br />c. {data.tanggal_kembali ? format(new Date(data.tanggal_kembali), 'dd MMMM yyyy', { locale: localeID }) : '-'}</td></tr>
-                                            <tr><td align="center">8.</td><td>Pengikut : Nama</td><td>
-                                                <ol className="list-unstyled-ol">
-                                                    {data.pengikut?.map((p: any, i: number) => (
-                                                        <li key={i}>
-                                                            {p.pegawai ? (
-                                                                <>
-                                                                    {formatNamaPenuh(p.pegawai)}
-                                                                    <span style={{ fontSize: '9pt', display: 'block', color: '#444' }}>
-                                                                        ({p.pegawai.pangkat?.nama || '-'} / {p.pegawai.golongan?.nama || '-'}) - {p.pegawai.jabatan || '-'}
-                                                                    </span>
-                                                                </>
-                                                            ) : p.nama}
-                                                        </li>
-                                                    ))}
-                                                    {!data.pengikut?.length && <li>-</li>}
-                                                </ol>
-                                            </td></tr>
-                                            <tr><td align="center">9.</td><td>Pembebanan Anggaran<br />a. Instansi<br />b. Mata Anggaran</td><td><br />a. {data.instansi?.nama_lengkap}<br />b. {data.mata_anggaran || data.spt?.pembebanan_anggaran || '-'}</td></tr>
-                                            <tr><td align="center">10.</td><td>Keterangan lain-lain</td><td>-</td></tr>
-                                        </tbody>
-                                    </table>
-
-                                    <div className="signature-area sppd-foot">
-                                        <div className="signature-box">
-                                            <p>Dikeluarkan di : {data.tempat_penerbitan || data.tempat_berangkat}</p>
-                                            <p>Pada tanggal : {data.tanggal_penerbitan ? format(new Date(data.tanggal_penerbitan), 'dd MMMM yyyy', { locale: localeID }) : format(new Date(), 'dd MMMM yyyy', { locale: localeID })}</p>
-                                            <div className="sign-role">
-                                                <strong>{data.penandatangan?.jabatan}</strong>
-                                            </div>
-                                            <div className="sign-space">
-                                                {data.penandatangan?.ttd_digital_path && (
-                                                    <img src={data.penandatangan.ttd_digital_path} alt="TTD" />
-                                                )}
-                                            </div>
-                                            <div className="sign-name">
-                                                <strong><u>{formatNamaPenuh(data.penandatangan)}</u></strong>
-                                                <p>{data.penandatangan?.pangkat?.nama}</p>
-                                                <p>NIP. {data.penandatangan?.nip}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="print-page page-break">
-                                <div className="doc-content-body">
-                                    {renderSppdBelakang()}
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            </div>
-
-            <style>{`
-                .doc-preview-page {
-                    min-height: 100vh;
-                    background: #f8fafc;
-                    display: flex;
-                    flex-direction: column;
-                }
-
-                .preview-toolbar {
-                    height: 70px;
-                    background: rgba(255, 255, 255, 0.8);
-                    backdrop-filter: blur(12px);
-                    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 0 40px;
-                    position: sticky;
-                    top: 0;
-                    z-index: 1000;
-                }
-
-                .toolbar-left { display: flex; align-items: center; gap: 24px; }
-                .toolbar-title { display: flex; align-items: center; gap: 10px; color: var(--p-primary); font-weight: 700; font-size: 16px; }
-                .toolbar-btn {
-                    width: 40px; height: 40px; border-radius: 12px;
-                    border: 1px solid var(--p-border);
-                    background: white; color: var(--p-text-main);
-                    display: flex; align-items: center; justify-content: center;
-                    cursor: pointer; transition: all 0.2s;
-                }
-                .toolbar-btn:hover { background: #f1f5f9; color: var(--p-accent); border-color: var(--p-accent); }
-
-                .btn-print-premium {
-                    background: var(--p-accent); color: white;
-                    border: none; padding: 0 24px; height: 44px;
-                    border-radius: 12px; font-weight: 700; font-size: 14px;
-                    display: flex; align-items: center; gap: 10px;
-                    cursor: pointer; transition: all 0.2s;
-                    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
-                }
-                .btn-print-premium:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(14, 165, 233, 0.4); }
-
-                .scroll-area {
-                    flex: 1;
-                    padding: 40px 0;
-                    overflow-y: auto;
-                    display: flex;
-                    justify-content: center;
-                }
-
-                .print-container {
-                    background: white;
-                    width: 215mm;
-                    min-height: 330mm;
-                    padding: 15mm 15mm 10mm;
-                    box-shadow: 0 10px 50px rgba(0, 0, 0, 0.08);
-                    border-radius: 4px;
-                    font-family: "Times New Roman", Times, serif;
-                    color: black;
-                }
-
-                .kop-surat {
-                    display: flex; align-items: center; justify-content: space-between;
-                    border-bottom: 4px double black;
-                    padding-bottom: 5px; margin-bottom: 15px;
-                }
-                .kop-surat.kop-bupati { border-bottom: none; margin-bottom: 10px; }
-                .kop-surat.kop-bupati .kop-logo-center { width: 100%; display: flex; justify-content: center; margin-bottom: 15px; }
-                .kop-surat.kop-bupati .kop-logo-center img { width: 90px; height: auto; }
-                .kop-surat.kop-bupati .bupati { font-size: 18pt; font-weight: bold; letter-spacing: 2px; }
-                .kop-surat.kop-sekda .sekda { font-size: 16pt; font-weight: bold; margin-top: 2px; }
-                .kop-surat.kop-sekda .kop-logo-left { width: 100px; }
-                .kop-border.thicker { border-bottom: 4px solid black; margin-top: 10px; }
-                .kop-logo-left, .kop-logo-right { width: 90px; display: flex; justify-content: center; }
-                .kop-logo-left img, .kop-logo-right img { width: 75px; height: auto; }
-                .kop-text { flex: 1; text-align: center; }
-                .kop-text h2 { margin: 0; font-size: 14pt; font-weight: bold; line-height: 1.2; }
-                .kop-text h1 { margin: 0; font-size: 16pt; font-weight: bold; line-height: 1.2; margin-top: 4px; }
-                .kop-text .alamat { margin: 0; font-size: 9pt; line-height: 1.3; margin-top: 2px; }
-                .kop-text .kontak { margin: 0; font-size: 8pt; line-height: 1.2; color: #333; }
-
-                .doc-title-section { text-align: center; margin-bottom: 10px; }
-                .doc-title-section h3 { margin: 0; font-size: 13pt; letter-spacing: 1px; }
-                .doc-title-section p { margin: 2px 0 0; font-size: 11pt; }
-                .underline { text-decoration: underline; }
-
-                .borderless-table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12pt; line-height: 1.5; }
-                .borderless-table td { border: none; padding: 2px 0; }
-
-                .commands-header { text-align: center; margin: 15px 0; }
-                .commands-header h4 { margin: 0; font-size: 12pt; text-decoration: underline; font-weight: bold; }
-
-                .pegawai-item { display: flex; gap: 10px; margin-bottom: 10px; }
-                .pegawai-num { width: 25px; }
-                .inner-data-table { border-collapse: collapse; font-size: 12pt; }
-                .inner-data-table td { border: none; padding: 1px 4px; }
-
-                .tujuan-ol { margin: 0; padding-left: 20px; line-height: 1.4; }
-                .list-unstyled-ol { margin: 0; padding-left: 15px; }
-
-                .signature-area { margin-top: 15px; display: flex; justify-content: flex-end; page-break-inside: avoid; }
-                .signature-box { width: 320px; text-align: center; }
-                .signature-box p { margin: 0; font-size: 11pt; }
-                .sign-role { margin: 15px 0 0; font-size: 12pt; text-align: center; }
-                .sign-space { height: 75px; display: flex; align-items: center; justify-content: center; }
-                .sign-space img { height: 65px; mix-blend-mode: multiply; }
-                .sign-name { line-height: 1.3; text-align: center; }
-                .sign-name strong { display: block; white-space: nowrap; font-size: 12pt; }
-                .sign-name p { font-size: 10.5pt; margin: 0; }
-
-                .sppd-grid-table { width: 100%; border-collapse: collapse; border: 1.5px solid black; table-layout: fixed; margin-bottom: 10px; }
-                .sppd-grid-table td { border: 1px solid black; padding: 4px 8px; vertical-align: top; font-size: 10.5pt; line-height: 1.3; overflow-wrap: break-word; }
-
-                .print-page { min-height: 290mm; display: flex; flex-direction: column; }
-                .page-break { break-before: page; page-break-before: always; border-top: 1px dashed #ccc; margin-top: 40px; }
-                @media print { 
-                    .page-break { border-top: none; margin-top: 0; } 
-                    .print-page { min-height: 300mm; }
-                }
-
-                .sppd-back-table { width: 100%; border-collapse: collapse; border: 1.5px solid black; }
-                .sppd-back-table td { border: 1px solid black; vertical-align: top; font-size: 10pt; }
-                .inner-back-table { width: 100%; border-collapse: collapse; }
-                .inner-back-table td { border: none !important; padding: 5px 8px !important; font-size: 9pt !important; }
-                .no-padding { padding: 0 !important; }
-
-                .preview-loading { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; background: white; }
-                .signature-title { text-wrap: balance; -webkit-text-wrap: balance; line-height: 1.2; margin-bottom: 5px; text-align: center; }
-                .preview-loading p { font-weight: 600; color: var(--p-text-muted); }
-                .spin { animation: spin 1s linear infinite; }
-
-                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
-                @media print {
-                    .no-print { display: none !important; }
-                    .doc-preview-page { background: white; padding: 0; }
-                    .scroll-area { padding: 0; }
-                    .print-container { 
-                        box-shadow: none; border: none; 
-                        padding: 0;
-                        width: 100%; margin: 0; 
-                    }
-                    .print-page, .spt-official {
-                        padding: 15mm 15mm 10mm;
-                        box-sizing: border-box;
-                    }
-                    @page { size: 215mm 330mm; margin: 0 !important; }
-                    body { margin: 0; padding: 0; }
-                }
-            `}</style>
+      <div style={{ fontFamily: '"Times New Roman", Times, serif', fontSize: '12pt', color: '#000', lineHeight: 1.6 }}>
+        {/* Title */}
+        <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+          <h3 style={{ margin: 0, fontSize: '13pt', fontWeight: 'bold', textDecoration: 'underline', letterSpacing: '1px' }}>SURAT PERINTAH TUGAS</h3>
+          {data.nomor_spt && <p style={{ margin: '3px 0 0', fontSize: '11pt' }}>Nomor : <strong>{data.nomor_spt}</strong></p>}
         </div>
+
+        {/* Dasar */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '14px' }}>
+          <tbody>
+            <tr>
+              <td style={{ width: '90px', verticalAlign: 'top', paddingRight: '4px' }}>Dasar :</td>
+              <td style={{ verticalAlign: 'top' }}>
+                {Array.isArray(data.dasar_perintah) && data.dasar_perintah.length > 0 ? (
+                  <ol style={{ margin: 0, paddingLeft: '18px' }}>
+                    {(data.dasar_perintah as DasarPerintah[]).map((d, i) => (
+                      <li key={i} style={{ marginBottom: '2px' }}>
+                        {d.nomor ? `${d.nomor} tanggal ${fmtDate(d.tanggal)} tentang ${d.perihal}` : d.perihal}
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <span>{String(data.dasar_perintah ?? '—')}</span>
+                )}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* Memerintahkan */}
+        <div style={{ textAlign: 'center', margin: '16px 0 12px' }}>
+          <strong style={{ fontSize: '12pt', textDecoration: 'underline', letterSpacing: '2px' }}>M E M E R I N T A H K A N :</strong>
+        </div>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <tbody>
+            <tr>
+              <td style={{ width: '90px', verticalAlign: 'top' }}>Kepada :</td>
+              <td>
+                {pegawaiList.map((pl, idx) => (
+                  <div key={pl.id} style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+                    <span style={{ width: '24px', flexShrink: 0 }}>{idx + 1}.</span>
+                    <table style={{ borderCollapse: 'collapse', fontSize: '12pt' }}>
+                      <tbody>
+                        <tr><td style={{ width: '75px', padding: '1px 0' }}>Nama</td><td style={{ padding: '1px 4px' }}>:</td><td style={{ padding: '1px 0', fontWeight: 'bold' }}>{formatNamaLengkap(pl.pegawai)}</td></tr>
+                        <tr><td style={{ padding: '1px 0' }}>NIP</td><td style={{ padding: '1px 4px' }}>:</td><td style={{ padding: '1px 0', fontFamily: 'monospace', fontSize: '11pt' }}>{pl.pegawai?.nip}</td></tr>
+                        <tr><td style={{ padding: '1px 0' }}>Pangkat</td><td style={{ padding: '1px 4px' }}>:</td><td style={{ padding: '1px 0' }}>{pl.pegawai?.ref_pangkat?.nama}{pl.pegawai?.ref_golongan ? ` / ${pl.pegawai.ref_golongan.nama}` : ''}</td></tr>
+                        <tr><td style={{ padding: '1px 0' }}>Jabatan</td><td style={{ padding: '1px 4px' }}>:</td><td style={{ padding: '1px 0' }}>{pl.pegawai?.jabatan}</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+              </td>
+            </tr>
+            <tr style={{ height: '8px' }} />
+            <tr>
+              <td style={{ verticalAlign: 'top' }}>Untuk :</td>
+              <td>
+                <ol style={{ margin: 0, paddingLeft: '18px', lineHeight: 1.6 }}>
+                  {(data.tujuan_kegiatan ?? []).map((t, i) => <li key={i}>{t}</li>)}
+                </ol>
+              </td>
+            </tr>
+            {data.lama_kegiatan && (
+              <tr>
+                <td style={{ verticalAlign: 'top', paddingTop: '6px' }}>Selama :</td>
+                <td style={{ paddingTop: '6px' }}>{data.lama_kegiatan} (hari) hari</td>
+              </tr>
+            )}
+            {data.pembebanan_anggaran && (
+              <tr>
+                <td style={{ verticalAlign: 'top', paddingTop: '6px' }}>Biaya :</td>
+                <td style={{ paddingTop: '6px' }}>Dibebankan pada {data.pembebanan_anggaran}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+
+        <SignatureBlock
+          place={data.tempat_penetapan}
+          date={data.tanggal_penetapan}
+          penandatangan={data.penandatangan}
+        />
+
+        {data.catatan && (
+          <p style={{ fontSize: '10pt', color: '#555', marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
+            Catatan: {data.catatan}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── SPPD Document Page 1 ─────────────────────────────────────────────────────
+const SPPDDocumentPage1: React.FC<{ data: SPPD }> = ({ data }) => {
+  const isDraft = data.status === 'Draft';
+  const pengikut = data.sppd_pengikut ?? [];
+
+  return (
+    <div style={{ position: 'relative' }}>
+      {isDraft && <DraftWatermark />}
+      <KopSurat instansi={data.instansi} />
+
+      <div style={{ fontFamily: '"Times New Roman", Times, serif', fontSize: '11pt', color: '#000' }}>
+        <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+          <h3 style={{ margin: 0, fontSize: '13pt', fontWeight: 'bold', textDecoration: 'underline', letterSpacing: '1px' }}>SURAT PERINTAH PERJALANAN DINAS</h3>
+          <p style={{ margin: '2px 0 0', fontSize: '11pt' }}>(S P P D)</p>
+          {data.nomor_sppd && <p style={{ margin: '3px 0 0', fontSize: '11pt' }}>Nomor : <strong>{data.nomor_sppd}</strong></p>}
+        </div>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #000', tableLayout: 'fixed', marginBottom: '10px' }}>
+          <tbody>
+            {[
+              { num: '1.', label: 'Pejabat Pemberi Perintah', value: data.penandatangan?.jabatan ?? '—' },
+              { num: '2.', label: 'Nama/NIP Pegawai yang Diperintah', value: (
+                <><strong>{formatNamaLengkap(data.pegawai)}</strong><br />NIP. {data.pegawai?.nip}</>
+              )},
+              { num: '3.', label: (
+                <>a. Pangkat dan Golongan<br />b. Jabatan/Instansi<br />c. Tingkat Biaya Perjalanan Dinas</>
+              ), value: (
+                <>
+                  a. {data.pegawai?.ref_pangkat?.nama ?? '—'} / {(data.pegawai as unknown as { ref_golongan?: { nama: string } })?.ref_golongan?.nama ?? '—'}<br />
+                  b. {data.pegawai?.jabatan ?? '—'} / {data.instansi?.nama_singkat ?? '—'}<br />
+                  c. {data.tingkat_perjalanan ?? '—'}
+                </>
+              )},
+              { num: '4.', label: 'Maksud Perjalanan Dinas', value: data.maksud_perjalanan },
+              { num: '5.', label: 'Alat Angkut yang Dipergunakan', value: data.alat_angkut ?? '—' },
+              { num: '6.', label: (<>a. Tempat Berangkat<br />b. Tempat Tujuan</>), value: (<>a. {data.tempat_berangkat}<br />b. {data.tempat_tujuan}</>) },
+              { num: '7.', label: (<>a. Lamanya Perjalanan Dinas<br />b. Tanggal Berangkat<br />c. Tanggal Harus Kembali</>), value: (
+                <>
+                  a. {data.lama_perjalanan} (hari)<br />
+                  b. {fmtDate(data.tanggal_berangkat)}<br />
+                  c. {fmtDate(data.tanggal_kembali)}
+                </>
+              )},
+              { num: '8.', label: 'Pengikut: Nama, Umur, Hub. Keluarga', value: (
+                pengikut.length === 0 ? '—' : (
+                  <ol style={{ margin: 0, paddingLeft: '14px', lineHeight: 1.5 }}>
+                    {pengikut.map((p, i) => (
+                      <li key={i}>
+                        {p.tipe === 'pegawai' && p.pegawai
+                          ? <>{formatNamaLengkap(p.pegawai)} — {p.pegawai.jabatan}</>
+                          : <>{p.nama ?? '—'}{p.umur ? `, ${p.umur} thn` : ''}{p.keterangan ? ` (${p.keterangan})` : ''}</>}
+                      </li>
+                    ))}
+                  </ol>
+                )
+              )},
+              { num: '9.', label: (<>Pembebanan Anggaran<br />a. Instansi<br />b. Mata Anggaran</>), value: (
+                <><br />a. {data.instansi?.nama_lengkap ?? '—'}<br />b. {data.mata_anggaran ?? data.spt?.pembebanan_anggaran ?? '—'}</>
+              )},
+              { num: '10.', label: 'Keterangan Lain-Lain', value: data.keterangan_lain ?? '—' },
+            ].map((row, i) => (
+              <tr key={i}>
+                <td style={{ border: '1px solid #000', padding: '4px 6px', width: '44px', verticalAlign: 'top', textAlign: 'center', fontWeight: 'bold' }}>{row.num}</td>
+                <td style={{ border: '1px solid #000', padding: '4px 8px', width: '200px', verticalAlign: 'top' }}>{row.label}</td>
+                <td style={{ border: '1px solid #000', padding: '4px 8px', verticalAlign: 'top', lineHeight: 1.4 }}>{row.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <SignatureBlock
+          label="Dikeluarkan di"
+          place={data.tempat_penerbitan ?? data.tempat_berangkat}
+          date={data.tanggal_penerbitan}
+          penandatangan={data.penandatangan}
+        />
+      </div>
+    </div>
+  );
+};
+
+// ─── SPPD Document Page 2 (Lembar Belakang / Realisasi) ──────────────────────
+const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
+  const sections = [
+    {
+      roman: 'I.', side: 'left',
+      rows: [
+        { label: 'Berangkat dari', value: data.tempat_berangkat },
+        { label: 'Ke', value: data.tempat_tujuan },
+        { label: 'Pada tanggal', value: fmtDate(data.tanggal_berangkat) },
+        { label: 'Kepala', value: data.instansi?.nama_singkat ?? '' },
+      ],
+    },
+    {
+      roman: 'II.', side: 'left',
+      rows: [
+        { label: 'Tiba di', value: data.tempat_tujuan },
+        { label: 'Pada tanggal', value: '…………………………' },
+        { label: 'Kepala', value: '…………………………' },
+      ],
+    },
+    {
+      roman: '', side: 'right',
+      rows: [
+        { label: 'Berangkat dari', value: data.tempat_tujuan },
+        { label: 'Ke', value: data.tempat_berangkat },
+        { label: 'Pada tanggal', value: '…………………………' },
+        { label: 'Kepala', value: '…………………………' },
+      ],
+    },
+    {
+      roman: 'III.', side: 'left',
+      rows: [
+        { label: 'Tiba di', value: '…………………………' },
+        { label: 'Pada tanggal', value: '…………………………' },
+        { label: 'Kepala', value: '…………………………' },
+      ],
+    },
+    {
+      roman: '', side: 'right',
+      rows: [
+        { label: 'Berangkat dari', value: '…………………………' },
+        { label: 'Ke', value: '…………………………' },
+        { label: 'Pada tanggal', value: '…………………………' },
+        { label: 'Kepala', value: '…………………………' },
+      ],
+    },
+    {
+      roman: 'IV.', side: 'left',
+      rows: [
+        { label: 'Tiba kembali di', value: data.tempat_berangkat },
+        { label: 'Pada tanggal', value: fmtDate(data.tanggal_kembali) },
+      ],
+    },
+  ];
+
+  return (
+    <div style={{ fontFamily: '"Times New Roman", Times, serif', fontSize: '10pt', color: '#000' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #000', marginBottom: '12px' }}>
+        <tbody>
+          {/* Row I: Berangkat + empty */}
+          <tr>
+            <td style={{ border: '1px solid #000', padding: 0, width: '50%', verticalAlign: 'top' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  <tr><td style={{ padding: '5px 8px', fontWeight: 'bold', width: '24px' }}>I.</td><td style={{ padding: '5px 0' }}>Berangkat dari</td><td style={{ padding: '5px 8px' }}>: {data.tempat_berangkat}</td></tr>
+                  <tr><td /><td style={{ padding: '2px 0' }}>Ke</td><td style={{ padding: '2px 8px' }}>: {data.tempat_tujuan}</td></tr>
+                  <tr><td /><td style={{ padding: '2px 0' }}>Pada tanggal</td><td style={{ padding: '2px 8px' }}>: {fmtDate(data.tanggal_berangkat)}</td></tr>
+                  <tr><td /><td style={{ padding: '2px 0' }}>Kepala</td><td style={{ padding: '2px 8px' }}>: {data.instansi?.nama_singkat}</td></tr>
+                  <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
+                  <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>
+                    <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
+                    {data.penandatangan?.ref_pangkat?.nama}<br />
+                    NIP. {data.penandatangan?.nip}
+                  </td></tr>
+                </tbody>
+              </table>
+            </td>
+            <td style={{ border: '1px solid #000', padding: '8px', verticalAlign: 'top', width: '50%' }}></td>
+          </tr>
+
+          {/* Row II & Kanan */}
+          <tr>
+            <td style={{ border: '1px solid #000', padding: 0, verticalAlign: 'top' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  <tr><td style={{ padding: '5px 8px', fontWeight: 'bold', width: '24px' }}>II.</td><td style={{ padding: '5px 0' }}>Tiba di</td><td style={{ padding: '5px 8px' }}>: …………………………</td></tr>
+                  <tr><td /><td style={{ padding: '2px 0' }}>Pada tanggal</td><td style={{ padding: '2px 8px' }}>: …………………………</td></tr>
+                  <tr><td /><td style={{ padding: '2px 0' }}>Kepala</td><td style={{ padding: '2px 8px' }}>: …………………………</td></tr>
+                  <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
+                  <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>( …………………………………… )</td></tr>
+                </tbody>
+              </table>
+            </td>
+            <td style={{ border: '1px solid #000', padding: 0, verticalAlign: 'top' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  <tr><td style={{ padding: '5px 8px' }}>Berangkat dari</td><td style={{ padding: '5px 8px' }}>: {data.tempat_tujuan}</td></tr>
+                  <tr><td style={{ padding: '2px 8px' }}>Ke</td><td style={{ padding: '2px 8px' }}>: {data.tempat_berangkat}</td></tr>
+                  <tr><td style={{ padding: '2px 8px' }}>Pada tanggal</td><td style={{ padding: '2px 8px' }}>: …………………………</td></tr>
+                  <tr><td style={{ padding: '2px 8px' }}>Kepala</td><td style={{ padding: '2px 8px' }}>: …………………………</td></tr>
+                  <tr style={{ height: '70px' }}><td colSpan={2} /></tr>
+                  <tr><td colSpan={2} style={{ textAlign: 'center' }}>( …………………………………… )</td></tr>
+                </tbody>
+              </table>
+            </td>
+          </tr>
+
+          {/* Row III & Kanan */}
+          <tr>
+            <td style={{ border: '1px solid #000', padding: 0, verticalAlign: 'top' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  <tr><td style={{ padding: '5px 8px', fontWeight: 'bold', width: '24px' }}>III.</td><td style={{ padding: '5px 0' }}>Tiba di</td><td style={{ padding: '5px 8px' }}>: …………………………</td></tr>
+                  <tr><td /><td style={{ padding: '2px 0' }}>Pada tanggal</td><td style={{ padding: '2px 8px' }}>: …………………………</td></tr>
+                  <tr><td /><td style={{ padding: '2px 0' }}>Kepala</td><td style={{ padding: '2px 8px' }}>: …………………………</td></tr>
+                  <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
+                  <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>( …………………………………… )</td></tr>
+                </tbody>
+              </table>
+            </td>
+            <td style={{ border: '1px solid #000', padding: 0, verticalAlign: 'top' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  <tr><td style={{ padding: '5px 8px' }}>Berangkat dari</td><td style={{ padding: '5px 8px' }}>: …………………………</td></tr>
+                  <tr><td style={{ padding: '2px 8px' }}>Ke</td><td style={{ padding: '2px 8px' }}>: …………………………</td></tr>
+                  <tr><td style={{ padding: '2px 8px' }}>Pada tanggal</td><td style={{ padding: '2px 8px' }}>: …………………………</td></tr>
+                  <tr><td style={{ padding: '2px 8px' }}>Kepala</td><td style={{ padding: '2px 8px' }}>: …………………………</td></tr>
+                  <tr style={{ height: '70px' }}><td colSpan={2} /></tr>
+                  <tr><td colSpan={2} style={{ textAlign: 'center' }}>( …………………………………… )</td></tr>
+                </tbody>
+              </table>
+            </td>
+          </tr>
+
+          {/* Row IV */}
+          <tr>
+            <td style={{ border: '1px solid #000', padding: 0, verticalAlign: 'top' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <tbody>
+                  <tr><td style={{ padding: '5px 8px', fontWeight: 'bold', width: '24px' }}>IV.</td><td style={{ padding: '5px 0' }}>Tiba kembali di</td><td style={{ padding: '5px 8px' }}>: {data.tempat_berangkat}</td></tr>
+                  <tr><td /><td style={{ padding: '2px 0' }}>Pada tanggal</td><td style={{ padding: '2px 8px' }}>: {fmtDate(data.tanggal_kembali)}</td></tr>
+                  <tr><td /><td colSpan={2} style={{ padding: '4px 8px', textAlign: 'center', fontWeight: 'bold' }}>{data.penandatangan?.jabatan ?? 'Pejabat Pembuat Komitmen'}:</td></tr>
+                  <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
+                  <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>
+                    <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
+                    {data.penandatangan?.ref_pangkat?.nama}<br />
+                    NIP. {data.penandatangan?.nip}
+                  </td></tr>
+                </tbody>
+              </table>
+            </td>
+            <td style={{ border: '1px solid #000', padding: '10px', verticalAlign: 'top', fontSize: '9.5pt' }}>
+              <p>Telah diperiksa, dengan keterangan bahwa perjalanan tersebut di atas benar dilakukan atas perintahnya dan semata-mata untuk kepentingan jabatan dalam waktu yang sesingkat-singkatnya.</p>
+              <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                <p style={{ fontWeight: 'bold' }}>{data.penandatangan?.jabatan ?? 'Pejabat Pembuat Komitmen'}:</p>
+                <div style={{ height: '70px' }} />
+                <p><strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
+                {data.penandatangan?.ref_pangkat?.nama}<br />
+                NIP. {data.penandatangan?.nip}</p>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* V. Catatan */}
+      <div style={{ border: '1.5px solid #000', borderTop: 'none', padding: '8px 10px' }}>
+        <strong>V. CATATAN LAIN-LAIN</strong>
+        <p style={{ marginTop: '4px', minHeight: '40px', fontSize: '10pt' }}></p>
+      </div>
+
+      {/* VI. Perhatian */}
+      <div style={{ border: '1.5px solid #000', borderTop: 'none', padding: '8px 10px' }}>
+        <strong>VI. PERHATIAN</strong>
+        <p style={{ fontSize: '9pt', marginTop: '4px' }}>
+          Pejabat yang berwenang menerbitkan SPPD, pegawai yang melakukan perjalanan dinas, para pejabat yang mengesahkan tanggal berangkat/tiba serta Bendaharawan bertanggung jawab berdasarkan peraturan-peraturan Keuangan Negara apabila Negara mendapat rugi akibat kesalahan, kealpaan dan kealpaannya.
+        </p>
+      </div>
+
+      {/* Ignore the sections variable if not needed in rendering above */}
+      {sections.length === 0 && null}
+    </div>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// DOCUMENT RENDERER PAGE
+// ═════════════════════════════════════════════════════════════════════════════
+const DocumentRenderer: React.FC = () => {
+  const { type, id } = useParams<{ type: string; id: string }>();
+  const navigate = useNavigate();
+  const [data, setData] = useState<SPT | SPPD | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const hasPrinted = useRef(false);
+
+  useEffect(() => {
+    const fetchDoc = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        if (type === 'spt') {
+          const { data: spt, error: err } = await supabase
+            .from('spt')
+            .select(`
+              *,
+              instansi:instansi_id(*),
+              penandatangan:penandatangan_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*)),
+              spt_pegawai:spt_pegawai(
+                *,
+                pegawai:pegawai_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*))
+              ),
+              mata_anggaran:mata_anggaran_id(*)
+            `)
+            .eq('id', id!)
+            .single();
+          if (err) throw err;
+          setData(spt as SPT);
+        } else if (type === 'sppd') {
+          const { data: sppd, error: err } = await supabase
+            .from('sppd')
+            .select(`
+              *,
+              instansi:instansi_id(*),
+              penandatangan:penandatangan_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*)),
+              pegawai:pegawai_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*)),
+              spt:spt_id(*),
+              sppd_pengikut:sppd_pengikut(
+                *,
+                pegawai:pegawai_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*))
+              ),
+              mata_anggaran:mata_anggaran_id(*)
+            `)
+            .eq('id', id!)
+            .single();
+          if (err) throw err;
+          setData(sppd as SPPD);
+        } else {
+          throw new Error('Tipe dokumen tidak valid. Gunakan "spt" atau "sppd".');
+        }
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : 'Dokumen tidak ditemukan.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchDoc();
+  }, [type, id]);
+
+  const handlePrint = async () => {
+    window.print();
+    if (!hasPrinted.current && data && id) {
+      hasPrinted.current = true;
+      const table = type === 'spt' ? 'spt' : 'sppd';
+      await supabase.from(table).update({
+        print_count: ((data as SPT).print_count ?? 0) + 1,
+        last_printed_at: new Date().toISOString(),
+      }).eq('id', id);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', gap: '16px' }}>
+        <Loader2 size={48} className="animate-spin" style={{ color: '#2563EB' }} />
+        <p style={{ fontWeight: 600, color: '#64748b', margin: 0 }}>Mempersiapkan dokumen...</p>
+      </div>
     );
+  }
+
+  if (error || !data) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', gap: '16px', padding: '24px' }}>
+        <FileText size={64} style={{ color: '#cbd5e1' }} />
+        <h3 style={{ margin: 0, color: '#0f172a' }}>Dokumen Tidak Ditemukan</h3>
+        <p style={{ margin: 0, color: '#64748b', textAlign: 'center' }}>{error ?? 'Pastikan ID dokumen benar atau hubungi administrator.'}</p>
+        <button onClick={() => navigate(-1)} className="btn btn-primary">
+          <ArrowLeft size={16} /> Kembali
+        </button>
+      </div>
+    );
+  }
+
+  const docData = data as (SPT & SPPD);
+
+  return (
+    <div className="doc-preview-page">
+      {/* Toolbar */}
+      <div className="preview-toolbar no-print">
+        <div className="toolbar-left">
+          <button className="toolbar-btn" onClick={() => navigate(-1)} title="Kembali">
+            <ArrowLeft size={18} />
+          </button>
+          <div className="toolbar-title">
+            <FileText size={18} />
+            <span>Pratinjau {type === 'spt' ? 'Surat Perintah Tugas' : 'Surat Perintah Perjalanan Dinas'}</span>
+          </div>
+          {(docData.nomor_spt || docData.nomor_sppd) && (
+            <code className="doc-number text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
+              {docData.nomor_spt ?? docData.nomor_sppd}
+            </code>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {docData.print_count > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#64748b' }}>
+              <Hash size={14} />
+              <span>Dicetak {docData.print_count}x</span>
+            </div>
+          )}
+          <button onClick={handlePrint} className="btn-print-premium">
+            <Printer size={18} /> Cetak Dokumen
+          </button>
+        </div>
+      </div>
+
+      {/* Document */}
+      <div className="scroll-area">
+        {type === 'spt' ? (
+          <div className="print-container">
+            <div className="spt-official">
+              <SPTDocument data={data as SPT} />
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="print-container">
+              <div className="print-page">
+                <SPPDDocumentPage1 data={data as SPPD} />
+              </div>
+              <div className="print-page page-break">
+                <SPPDDocumentPage2 data={data as SPPD} />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <style>{`
+        .doc-preview-page {
+          min-height: 100vh;
+          background: #f1f5f9;
+          display: flex;
+          flex-direction: column;
+        }
+        .preview-toolbar {
+          height: 64px;
+          background: rgba(255,255,255,0.9);
+          backdrop-filter: blur(12px);
+          border-bottom: 1px solid rgba(0,0,0,0.06);
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 0 32px;
+          position: sticky;
+          top: 0;
+          z-index: 100;
+        }
+        .toolbar-left { display: flex; align-items: center; gap: 16px; }
+        .toolbar-title { display: flex; align-items: center; gap: 8px; color: #2563EB; font-weight: 700; font-size: 15px; }
+        .toolbar-btn {
+          width: 38px; height: 38px; border-radius: 10px;
+          border: 1px solid #e2e8f0; background: white;
+          display: flex; align-items: center; justify-content: center;
+          cursor: pointer; transition: all 0.15s; color: #475569;
+        }
+        .toolbar-btn:hover { background: #f8fafc; color: #2563EB; border-color: #2563EB; }
+        .btn-print-premium {
+          background: linear-gradient(135deg, #2563EB, #1D4ED8);
+          color: white; border: none;
+          padding: 0 20px; height: 42px; border-radius: 12px;
+          font-weight: 700; font-size: 14px;
+          display: flex; align-items: center; gap: 8px;
+          cursor: pointer; transition: all 0.2s;
+          box-shadow: 0 4px 12px rgba(37,99,235,0.35);
+        }
+        .btn-print-premium:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(37,99,235,0.45); }
+        .scroll-area {
+          flex: 1;
+          padding: 40px 20px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 24px;
+          overflow-y: auto;
+        }
+        .print-container {
+          background: white;
+          width: 215mm;
+          min-height: 330mm;
+          padding: 15mm 15mm 12mm;
+          box-shadow: 0 8px 40px rgba(0,0,0,0.1);
+          border-radius: 4px;
+        }
+        .print-page { min-height: 295mm; position: relative; }
+        .page-break { border-top: 2px dashed #e2e8f0; margin-top: 32px; padding-top: 32px; }
+        @media print {
+          .no-print { display: none !important; }
+          .doc-preview-page { background: white !important; }
+          .scroll-area { padding: 0 !important; }
+          .print-container {
+            box-shadow: none !important;
+            border: none !important;
+            border-radius: 0 !important;
+            width: 100% !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          .print-page, .spt-official { padding: 15mm 15mm 12mm; box-sizing: border-box; }
+          .page-break { border-top: none !important; margin-top: 0 !important; padding-top: 0 !important; break-before: page; page-break-before: always; }
+          @page { size: 215mm 330mm; margin: 0 !important; }
+          body { margin: 0 !important; padding: 0 !important; background: white !important; }
+        }
+      `}</style>
+    </div>
+  );
 };
 
 export default DocumentRenderer;

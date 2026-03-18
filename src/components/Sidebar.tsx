@@ -1,381 +1,466 @@
-import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
+import React, { useState } from 'react';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
   FileText,
-  ChevronDown,
+  Plane,
+  Users,
+  History,
   BarChart3,
-  Database,
+  Settings,
+  UserCog,
+  Shield,
+  ChevronLeft,
+  ChevronRight,
+  Bell,
   LogOut,
-  Settings as SettingsIcon
 } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 
-const Sidebar: React.FC = () => {
-  const { profile, signOut } = useAuth();
+// ─────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────
+interface SidebarProps {
+  collapsed: boolean;
+  onToggle: () => void;
+}
+
+interface NavItem {
+  label: string;
+  path: string;
+  icon: React.ReactNode;
+  roles?: ('Admin' | 'Operator' | 'Pejabat' | 'Pegawai')[];
+}
+
+interface NavGroup {
+  groupLabel: string;
+  items: NavItem[];
+  adminOnly?: boolean;
+}
+
+// ─────────────────────────────────────────────
+// Tooltip wrapper (for collapsed state)
+// ─────────────────────────────────────────────
+const Tooltip: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => {
+  const [show, setShow] = useState(false);
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      <AnimatePresence>
+        {show && (
+          <motion.div
+            initial={{ opacity: 0, x: -4 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50 pointer-events-none"
+          >
+            <div className="bg-slate-900 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-xl">
+              {label}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+// Navigation config
+// ─────────────────────────────────────────────
+const NAV_GROUPS: NavGroup[] = [
+  {
+    groupLabel: 'UTAMA',
+    items: [
+      { label: 'Dashboard', path: '/', icon: <LayoutDashboard size={18} /> },
+    ],
+  },
+  {
+    groupLabel: 'DOKUMEN',
+    items: [
+      {
+        label: 'SPT - Surat Perintah Tugas',
+        path: '/spt',
+        icon: <FileText size={18} />,
+        roles: ['Admin', 'Operator', 'Pejabat'],
+      },
+      {
+        label: 'SPPD - Perjalanan Dinas',
+        path: '/sppd',
+        icon: <Plane size={18} />,
+        roles: ['Admin', 'Operator', 'Pejabat'],
+      },
+    ],
+  },
+  {
+    groupLabel: 'DATA',
+    items: [
+      {
+        label: 'Data Pegawai',
+        path: '/pegawai',
+        icon: <Users size={18} />,
+        roles: ['Admin', 'Operator'],
+      },
+      {
+        label: 'Riwayat Dokumen',
+        path: '/riwayat',
+        icon: <History size={18} />,
+      },
+      {
+        label: 'Laporan & Analitik',
+        path: '/laporan',
+        icon: <BarChart3 size={18} />,
+        roles: ['Admin', 'Operator', 'Pejabat'],
+      },
+    ],
+  },
+  {
+    groupLabel: 'PENGATURAN',
+    adminOnly: true,
+    items: [
+      {
+        label: 'Pengaturan',
+        path: '/settings',
+        icon: <Settings size={18} />,
+        roles: ['Admin', 'Operator'],
+      },
+      {
+        label: 'Manajemen Pengguna',
+        path: '/settings/users',
+        icon: <UserCog size={18} />,
+        roles: ['Admin'],
+      },
+      {
+        label: 'Log Audit',
+        path: '/settings/audit',
+        icon: <Shield size={18} />,
+        roles: ['Admin'],
+      },
+    ],
+  },
+];
+
+// ─────────────────────────────────────────────
+// Main Sidebar component
+// ─────────────────────────────────────────────
+const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
+  const { profile, signOut, hasRole, showSessionWarning } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
-  const [openMenus, setOpenMenus] = React.useState<string[]>(['dokumentasi']);
+
+  // Unread notification count (placeholder — wire to real data as needed)
+  const unreadCount = 0;
 
   const handleSignOut = async () => {
     await signOut();
-    navigate('/login');
+    navigate('/masuk');
   };
 
-  const toggleMenu = (menu: string) => {
-    setOpenMenus(prev =>
-      prev.includes(menu) ? prev.filter(m => m !== menu) : [...prev, menu]
-    );
+  const handleKeepSession = () => {
+    // Dispatching a user activity event resets the inactivity timers in useAuth
+    window.dispatchEvent(new MouseEvent('click'));
   };
 
-  const isAdmin = profile?.role === 'Admin';
-  const isOperator = profile?.role === 'Operator';
-  const isPejabat = profile?.role === 'Pejabat';
+  const getInitials = (name: string) =>
+    name
+      .split(' ')
+      .slice(0, 2)
+      .map(n => n[0])
+      .join('')
+      .toUpperCase();
+
+  const isItemActive = (path: string) => {
+    if (path === '/') return location.pathname === '/';
+    return location.pathname.startsWith(path);
+  };
+
+  const canViewItem = (item: NavItem): boolean => {
+    if (!item.roles) return true;
+    return hasRole(item.roles);
+  };
+
+  const canViewGroup = (group: NavGroup): boolean => {
+    if (!group.adminOnly) return true;
+    return hasRole(['Admin', 'Operator']);
+  };
+
+  // ── Sidebar width via framer-motion ──
+  const sidebarWidth = collapsed ? 72 : 280;
 
   return (
-    <aside className="sidebar glass-effect">
-      <div className="sidebar-header">
-        <div className="logo-container">
-          <div className="logo-box">SP</div>
-          <div className="logo-text-group">
-            <span className="logo-text">SiSPPD</span>
-            <span className="logo-subtext">Integrated System</span>
+    <>
+      {/* ── Sidebar ── */}
+      <motion.aside
+        animate={{ width: sidebarWidth }}
+        transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+        className="sidebar-nav flex-shrink-0 overflow-hidden"
+        style={{ width: sidebarWidth }}
+      >
+        <div className="flex flex-col h-full">
+
+          {/* ── Logo + Toggle ── */}
+          <div className="flex items-center justify-between px-4 py-5 flex-shrink-0" style={{ minHeight: 72 }}>
+            <AnimatePresence>
+              {!collapsed && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="flex items-center gap-2.5 overflow-hidden"
+                >
+                  {/* Logo icon */}
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 font-extrabold text-sm text-white"
+                    style={{ background: 'linear-gradient(135deg, #2563EB, #1D4ED8)' }}
+                  >
+                    SP
+                  </div>
+                  <div className="leading-none">
+                    <p className="text-white font-bold text-base tracking-tight">SiSPPD</p>
+                    <p className="text-slate-500 text-[10px] font-semibold uppercase tracking-widest">
+                      Integrated System
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {collapsed && (
+              <div
+                className="w-9 h-9 rounded-xl flex items-center justify-center font-extrabold text-sm text-white mx-auto"
+                style={{ background: 'linear-gradient(135deg, #2563EB, #1D4ED8)' }}
+              >
+                SP
+              </div>
+            )}
+
+            {/* Notification bell — visible only when expanded */}
+            <AnimatePresence>
+              {!collapsed && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="relative ml-auto mr-2"
+                >
+                  <button
+                    className="btn-ghost p-1.5 rounded-lg relative"
+                    style={{ color: '#94a3b8' }}
+                    aria-label="Notifikasi"
+                  >
+                    <Bell size={18} />
+                    {unreadCount > 0 && (
+                      <span className="notif-dot" />
+                    )}
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Collapse toggle */}
+            <button
+              onClick={onToggle}
+              className="flex items-center justify-center w-7 h-7 rounded-lg transition-colors duration-150 flex-shrink-0"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                color: '#94a3b8',
+              }}
+              aria-label={collapsed ? 'Perluas sidebar' : 'Ciutkan sidebar'}
+            >
+              {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+            </button>
+          </div>
+
+          {/* ── Navigation ── */}
+          <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 pb-4 no-scrollbar">
+            {NAV_GROUPS.map(group => {
+              if (!canViewGroup(group)) return null;
+              const visibleItems = group.items.filter(canViewItem);
+              if (visibleItems.length === 0) return null;
+
+              return (
+                <div key={group.groupLabel}>
+                  <AnimatePresence>
+                    {!collapsed && (
+                      <motion.p
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="sidebar-group-label"
+                      >
+                        {group.groupLabel}
+                      </motion.p>
+                    )}
+                  </AnimatePresence>
+
+                  {collapsed && <div className="mt-4" />}
+
+                  <ul className="space-y-0.5">
+                    {visibleItems.map(item => {
+                      const active = isItemActive(item.path);
+                      const linkEl = (
+                        <NavLink
+                          to={item.path}
+                          end={item.path === '/'}
+                          className={() =>
+                            `sidebar-item ${active ? 'active' : ''} ${collapsed ? 'collapsed' : ''}`
+                          }
+                          aria-label={item.label}
+                        >
+                          <span className="flex-shrink-0">{item.icon}</span>
+                          <AnimatePresence>
+                            {!collapsed && (
+                              <motion.span
+                                initial={{ opacity: 0, width: 0 }}
+                                animate={{ opacity: 1, width: 'auto' }}
+                                exit={{ opacity: 0, width: 0 }}
+                                transition={{ duration: 0.15 }}
+                                className="truncate whitespace-nowrap overflow-hidden"
+                              >
+                                {item.label}
+                              </motion.span>
+                            )}
+                          </AnimatePresence>
+                        </NavLink>
+                      );
+
+                      return (
+                        <li key={item.path}>
+                          {collapsed ? (
+                            <Tooltip label={item.label}>{linkEl}</Tooltip>
+                          ) : (
+                            linkEl
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              );
+            })}
+          </nav>
+
+          {/* ── User Profile + Logout ── */}
+          <div
+            className="flex-shrink-0 border-t px-3 py-4"
+            style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+          >
+            {profile && (
+              <>
+                {/* Avatar + info row */}
+                <div className={`flex items-center gap-3 mb-3 ${collapsed ? 'justify-center' : ''}`}>
+                  {/* Avatar */}
+                  {collapsed ? (
+                    <Tooltip label={profile.nama_lengkap}>
+                      <div
+                        className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 text-white cursor-default"
+                        style={{ background: 'linear-gradient(135deg, #2563EB, #7C3AED)' }}
+                      >
+                        {getInitials(profile.nama_lengkap)}
+                      </div>
+                    </Tooltip>
+                  ) : (
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 text-white"
+                      style={{ background: 'linear-gradient(135deg, #2563EB, #7C3AED)' }}
+                    >
+                      {getInitials(profile.nama_lengkap)}
+                    </div>
+                  )}
+
+                  <AnimatePresence>
+                    {!collapsed && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="flex-1 min-w-0"
+                      >
+                        <p className="text-white text-sm font-semibold truncate leading-tight">
+                          {profile.nama_lengkap}
+                        </p>
+                        <span className="badge badge-blue text-[10px] mt-0.5">{profile.role}</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Logout button */}
+                {collapsed ? (
+                  <Tooltip label="Keluar">
+                    <button
+                      onClick={handleSignOut}
+                      className="sidebar-item collapsed w-full text-rose-400 hover:text-rose-300"
+                      style={{ justifyContent: 'center' }}
+                      aria-label="Keluar"
+                    >
+                      <LogOut size={18} />
+                    </button>
+                  </Tooltip>
+                ) : (
+                  <button
+                    onClick={handleSignOut}
+                    className="sidebar-item w-full text-rose-400 hover:text-rose-300"
+                    style={{ gap: '0.75rem' }}
+                    aria-label="Keluar"
+                  >
+                    <LogOut size={18} className="flex-shrink-0" />
+                    <span className="text-sm font-medium">Keluar</span>
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
-      </div>
+      </motion.aside>
 
-      <div className="sidebar-user">
-        <div className="user-avatar-glow">
-          <div className="user-avatar">
-            {profile?.nama_lengkap?.charAt(0) || 'U'}
-          </div>
-        </div>
-        <div className="user-info">
-          <p className="user-name">{profile?.nama_lengkap || 'User'}</p>
-          <p className="user-role-badge">{profile?.role || 'Guest'}</p>
-        </div>
-      </div>
-
-      <nav className="sidebar-nav">
-        <NavLink to="/" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-          <LayoutDashboard size={20} />
-          <span>Dashboard</span>
-        </NavLink>
-
-        <div className="nav-group">
-          <button className="nav-group-header" onClick={() => toggleMenu('dokumentasi')}>
-            <div className="header-left">
-              <FileText size={20} />
-              <span>Dokumentasi</span>
-            </div>
-            <ChevronDown size={14} className={`chevron ${openMenus.includes('dokumentasi') ? 'open' : ''}`} />
-          </button>
-
-          {openMenus.includes('dokumentasi') && (
-            <div className="nav-group-items">
-              {(isAdmin || isOperator || isPejabat) && (
-                <NavLink to="/spt" className={({ isActive }) => `sub-nav-link ${isActive ? 'active' : ''}`}>
-                  <span>Modul SPT</span>
-                </NavLink>
-              )}
-              {(isAdmin || isOperator || isPejabat) && (
-                <NavLink to="/sppd" className={({ isActive }) => `sub-nav-link ${isActive ? 'active' : ''}`}>
-                  <span>Modul SPPD</span>
-                </NavLink>
-              )}
-              {(isAdmin || isOperator || isPejabat) && (
-                <NavLink to="/riwayat" className={({ isActive }) => `sub-nav-link ${isActive ? 'active' : ''}`}>
-                  <span>Riwayat Arsip</span>
-                </NavLink>
-              )}
-            </div>
-          )}
-        </div>
-
-        {(isAdmin || isOperator || isPejabat) && (
-          <NavLink to="/laporan" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            <BarChart3 size={20} />
-            <span>Laporan & Rekap</span>
-          </NavLink>
+      {/* ── Inactivity / Session Warning Modal ── */}
+      <AnimatePresence>
+        {showSessionWarning && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="modal-backdrop"
+            style={{ zIndex: 9999 }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="modal-panel modal-sm"
+            >
+              <div className="modal-header">
+                <h2 className="modal-title">Sesi Akan Berakhir</h2>
+              </div>
+              <div className="modal-body">
+                <p className="text-slate-600 text-sm">
+                  Sesi Anda akan berakhir dalam <span className="font-semibold text-amber-600">5 menit</span> karena
+                  tidak ada aktivitas. Apakah Anda ingin tetap login?
+                </p>
+              </div>
+              <div className="modal-footer">
+                <button className="btn-ghost" onClick={handleSignOut}>
+                  Keluar
+                </button>
+                <button className="btn-primary" onClick={handleKeepSession}>
+                  Tetap Login
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
-
-        <div className="nav-group">
-          <button className="nav-group-header" onClick={() => toggleMenu('master')}>
-            <div className="header-left">
-              <Database size={20} />
-              <span>Master Data</span>
-            </div>
-            <ChevronDown size={14} className={`chevron ${openMenus.includes('master') ? 'open' : ''}`} />
-          </button>
-
-          {openMenus.includes('master') && (
-            <div className="nav-group-items">
-              {(isAdmin || isOperator) && (
-                <NavLink to="/pegawai" className={({ isActive }) => `sub-nav-link ${isActive ? 'active' : ''}`}>
-                  <span>Data Pegawai</span>
-                </NavLink>
-              )}
-            </div>
-          )}
-        </div>
-
-        {(isAdmin || isOperator) && (
-          <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            <SettingsIcon size={20} />
-            <span>Pengaturan</span>
-          </NavLink>
-        )}
-      </nav>
-
-      <div className="sidebar-footer">
-        <button onClick={handleSignOut} className="btn-logout">
-          <div className="logout-icon-bg">
-            <LogOut size={18} />
-          </div>
-          <span>Keluar Sesi</span>
-        </button>
-      </div>
-
-      <style>{`
-        .sidebar {
-          width: 280px;
-          height: 100vh;
-          display: flex;
-          flex-direction: column;
-          position: fixed;
-          left: 0;
-          top: 0;
-          z-index: 100;
-          border-right: 1px solid var(--p-border);
-        }
-        .sidebar-header {
-          padding: 32px 24px;
-        }
-        .logo-container {
-          display: flex;
-          align-items: center;
-          gap: 14px;
-        }
-        .logo-box {
-          width: 42px;
-          height: 42px;
-          background: var(--p-primary);
-          border-radius: 12px;
-          color: white;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 800;
-          font-size: 16px;
-          box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
-        }
-        .logo-text-group {
-          display: flex;
-          flex-direction: column;
-        }
-        .logo-text {
-          font-family: var(--font-heading);
-          font-size: 22px;
-          font-weight: 800;
-          color: var(--p-primary);
-          letter-spacing: -1px;
-          line-height: 1;
-        }
-        .logo-subtext {
-          font-size: 10px;
-          font-weight: 600;
-          color: var(--p-text-muted);
-          text-transform: uppercase;
-          letter-spacing: 1px;
-        }
-        .sidebar-user {
-          margin: 0 20px 32px;
-          padding: 20px;
-          background: white;
-          border-radius: var(--radius-p);
-          border: 1px solid var(--p-border);
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          box-shadow: var(--shadow-p);
-        }
-        .user-avatar-glow {
-          padding: 3px;
-          background: linear-gradient(135deg, var(--p-accent), var(--p-accent-deep));
-          border-radius: 50%;
-        }
-        .user-avatar {
-          width: 44px;
-          height: 44px;
-          background: white;
-          color: var(--p-primary);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: 800;
-          font-size: 18px;
-        }
-        .user-info {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-        }
-        .user-name {
-          font-size: 14px;
-          font-weight: 700;
-          color: var(--p-text-main);
-          margin: 0;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 130px;
-        }
-        .user-role-badge {
-          font-size: 10px;
-          font-weight: 700;
-          color: var(--p-accent);
-          background: #eff6ff;
-          padding: 2px 8px;
-          border-radius: 4px;
-          display: inline-block;
-          width: fit-content;
-          text-transform: uppercase;
-        }
-        .sidebar-nav {
-          flex: 1;
-          padding: 0 16px;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-        .nav-label {
-          font-size: 11px;
-          font-weight: 800;
-          color: var(--p-text-muted);
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          margin: 20px 12px 8px;
-        }
-        .nav-link {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 12px 16px;
-          color: var(--p-text-muted);
-          text-decoration: none;
-          font-size: 14px;
-          font-weight: 600;
-          border-radius: 10px;
-          transition: var(--transition-p);
-        }
-        .nav-link:hover {
-          background: #f1f5f9;
-          color: var(--p-primary);
-          padding-left: 20px;
-        }
-        .nav-link.active {
-          background: var(--p-primary);
-          color: white;
-          box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
-        }
-        .sidebar-footer {
-          padding: 24px 16px;
-          border-top: 1px solid var(--p-border);
-        }
-        .btn-logout {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          width: 100%;
-          padding: 12px 16px;
-          border: none;
-          background: transparent;
-          color: var(--p-error);
-          font-size: 14px;
-          font-weight: 700;
-          cursor: pointer;
-          border-radius: 10px;
-          transition: var(--transition-p);
-        }
-        .btn-logout:hover {
-          background: #fef2f2;
-          padding-left: 20px;
-        }
-        .logout-icon-bg {
-          width: 32px;
-          height: 32px;
-          background: #fee2e2;
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        /* Nav Groups */
-        .nav-group {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-        }
-        .nav-group-header {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 12px 16px;
-          color: var(--p-text-muted);
-          background: transparent;
-          border: none;
-          font-size: 14px;
-          font-weight: 600;
-          cursor: pointer;
-          border-radius: 10px;
-          transition: all 0.2s;
-        }
-        .nav-group-header:hover {
-          background: #f1f5f9;
-          color: var(--p-primary);
-        }
-        .header-left {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .chevron {
-          transition: transform 0.3s;
-        }
-        .chevron.open {
-          transform: rotate(180deg);
-        }
-        .nav-group-items {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-          margin-left: 20px;
-          padding-left: 12px;
-          border-left: 1px solid var(--p-border);
-          margin-top: 4px;
-          margin-bottom: 8px;
-        }
-        .sub-nav-link {
-          padding: 8px 16px;
-          color: var(--p-text-muted);
-          text-decoration: none;
-          font-size: 13px;
-          font-weight: 500;
-          border-radius: 8px;
-          transition: all 0.2s;
-        }
-        .sub-nav-link:hover {
-          color: var(--p-primary);
-          background: #f8fafc;
-        }
-        .sub-nav-link.active {
-          color: var(--p-primary);
-          background: #eff6ff;
-          font-weight: 700;
-        }
-      `}</style>
-    </aside>
+      </AnimatePresence>
+    </>
   );
 };
 

@@ -1,141 +1,120 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import type { Pangkat, Golongan, TingkatPerjalanan, AlatAngkut, MataAnggaran } from '../types';
+import { useAuth } from './useAuth';
+import type { RefPangkat, RefGolongan, RefTingkatPerjalanan, RefAlatAngkut, Instansi, Penandatangan, MataAnggaran } from '../types';
 
-export const useReferensi = () => {
-    const [pangkats, setPangkats] = useState<Pangkat[]>([]);
-    const [golongans, setGolongans] = useState<Golongan[]>([]);
-    const [tingkatPerjalanan, setTingkatPerjalanan] = useState<TingkatPerjalanan[]>([]);
-    const [alatAngkut, setAlatAngkut] = useState<AlatAngkut[]>([]);
-    const [mataAnggaran, setMataAnggaran] = useState<MataAnggaran[]>([]);
-    const [loading, setLoading] = useState(true);
+export function useReferensi() {
+  const { tenantId } = useAuth();
 
-    const fetchData = useCallback(async () => {
-        setLoading(true);
-        try {
-            const [
-                { data: pk, error: pkErr },
-                { data: gl, error: glErr },
-                { data: tp, error: tpErr },
-                { data: aa, error: aaErr },
-                { data: ma, error: maErr }
-            ] = await Promise.all([
-                supabase.from('ref_pangkat').select('*').order('urutan', { ascending: true }),
-                supabase.from('ref_golongan').select('*').order('urutan', { ascending: true }),
-                supabase.from('ref_tingkat_perjalanan').select('*').order('kode', { ascending: true }),
-                supabase.from('ref_alat_angkut').select('*').order('nama', { ascending: true }),
-                supabase.from('mata_anggaran').select('*').order('kode', { ascending: true })
-            ]);
+  const pangkat = useQuery({
+    queryKey: ['ref_pangkat'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ref_pangkat')
+        .select('*')
+        .order('urutan');
+      if (error) throw error;
+      return data as RefPangkat[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
-            if (pkErr) console.error('Error pangkats:', pkErr);
-            if (glErr) console.error('Error golongans:', glErr);
-            if (tpErr) console.error('Error tingkat:', tpErr);
-            if (aaErr) console.error('Error alat:', aaErr);
-            if (maErr) console.error('Error anggaran:', maErr);
+  const golongan = useQuery({
+    queryKey: ['ref_golongan'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ref_golongan')
+        .select('*')
+        .order('urutan');
+      if (error) throw error;
+      return data as RefGolongan[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
-            setPangkats(pk || []);
-            setGolongans(gl || []);
-            setTingkatPerjalanan(tp || []);
-            setAlatAngkut(aa || []);
-            setMataAnggaran(ma || []);
-        } catch (error) {
-            console.error('Error fetching reference data:', error);
-        } finally {
-            setLoading(false);
-        }
-    }, [setPangkats, setGolongans, setTingkatPerjalanan, setAlatAngkut, setMataAnggaran, setLoading]);
+  const tingkatPerjalanan = useQuery({
+    queryKey: ['ref_tingkat_perjalanan'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ref_tingkat_perjalanan')
+        .select('*')
+        .order('kode');
+      if (error) throw error;
+      return data as RefTingkatPerjalanan[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
-    useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+  const alatAngkut = useQuery({
+    queryKey: ['ref_alat_angkut'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ref_alat_angkut')
+        .select('*')
+        .order('nama');
+      if (error) throw error;
+      return data as RefAlatAngkut[];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
 
-    const savePangkat = useCallback(async (data: Partial<Pangkat>) => {
-        const { error } = data.id
-            ? await supabase.from('ref_pangkat').update(data).eq('id', data.id)
-            : await supabase.from('ref_pangkat').insert(data);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
+  const instansi = useQuery({
+    queryKey: ['instansi', tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('instansi')
+        .select('*')
+        .order('is_primary', { ascending: false });
+      if (error) throw error;
+      return data as Instansi[];
+    },
+    enabled: !!tenantId,
+    staleTime: 2 * 60 * 1000,
+  });
 
-    const deletePangkat = useCallback(async (id: number) => {
-        const { error } = await supabase.from('ref_pangkat').delete().eq('id', id);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
+  const instansiPrimary = instansi.data?.find(i => i.is_primary) ?? instansi.data?.[0];
 
-    const saveGolongan = useCallback(async (data: Partial<Golongan>) => {
-        const { error } = data.id
-            ? await supabase.from('ref_golongan').update(data).eq('id', data.id)
-            : await supabase.from('ref_golongan').insert(data);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
+  const penandatangan = useQuery({
+    queryKey: ['penandatangan', tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('penandatangan')
+        .select('*, ref_pangkat(*), ref_golongan(*)')
+        .eq('status_aktif', true)
+        .order('nama_lengkap');
+      if (error) throw error;
+      return data as Penandatangan[];
+    },
+    enabled: !!tenantId,
+    staleTime: 2 * 60 * 1000,
+  });
 
-    const deleteGolongan = useCallback(async (id: number) => {
-        const { error } = await supabase.from('ref_golongan').delete().eq('id', id);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
+  const mataAnggaran = useQuery({
+    queryKey: ['mata_anggaran', tenantId],
+    queryFn: async () => {
+      const year = new Date().getFullYear();
+      const { data, error } = await supabase
+        .from('mata_anggaran')
+        .select('*')
+        .eq('tahun', year)
+        .eq('is_active', true)
+        .order('kode');
+      if (error) throw error;
+      return data as MataAnggaran[];
+    },
+    enabled: !!tenantId,
+    staleTime: 2 * 60 * 1000,
+  });
 
-    const saveTingkatPerjalanan = useCallback(async (data: Partial<TingkatPerjalanan>) => {
-        const { error } = data.id
-            ? await supabase.from('ref_tingkat_perjalanan').update(data).eq('id', data.id)
-            : await supabase.from('ref_tingkat_perjalanan').insert(data);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
-
-    const deleteTingkatPerjalanan = useCallback(async (id: number) => {
-        const { error } = await supabase.from('ref_tingkat_perjalanan').delete().eq('id', id);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
-
-    const saveAlatAngkut = useCallback(async (data: Partial<AlatAngkut>) => {
-        const { error } = data.id
-            ? await supabase.from('ref_alat_angkut').update(data).eq('id', data.id)
-            : await supabase.from('ref_alat_angkut').insert(data);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
-
-    const deleteAlatAngkut = useCallback(async (id: number) => {
-        const { error } = await supabase.from('ref_alat_angkut').delete().eq('id', id);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
-
-    const saveMataAnggaran = useCallback(async (data: Partial<MataAnggaran>) => {
-        const { error } = data.id
-            ? await supabase.from('mata_anggaran').update(data).eq('id', data.id)
-            : await supabase.from('mata_anggaran').insert(data);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
-
-    const deleteMataAnggaran = useCallback(async (id: number) => {
-        const { error } = await supabase.from('mata_anggaran').delete().eq('id', id);
-        if (error) throw error;
-        await fetchData();
-    }, [fetchData]);
-
-    return {
-        pangkats,
-        golongans,
-        tingkatPerjalanan,
-        alatAngkut,
-        mataAnggaran,
-        loading,
-        refresh: fetchData,
-        savePangkat,
-        deletePangkat,
-        saveGolongan,
-        deleteGolongan,
-        saveTingkatPerjalanan,
-        deleteTingkatPerjalanan,
-        saveAlatAngkut,
-        deleteAlatAngkut,
-        saveMataAnggaran,
-        deleteMataAnggaran
-    };
-};
+  return {
+    pangkat: pangkat.data ?? [],
+    golongan: golongan.data ?? [],
+    tingkatPerjalanan: tingkatPerjalanan.data ?? [],
+    alatAngkut: alatAngkut.data ?? [],
+    instansi: instansi.data ?? [],
+    instansiPrimary,
+    penandatangan: penandatangan.data ?? [],
+    mataAnggaran: mataAnggaran.data ?? [],
+    isLoading: pangkat.isLoading || golongan.isLoading,
+  };
+}

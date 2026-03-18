@@ -1,4 +1,4 @@
-import type { Pangkat, Golongan, Instansi } from './index';
+import type { RefPangkat, RefGolongan, Instansi } from './index';
 
 export interface Penandatangan {
     id: number;
@@ -14,7 +14,7 @@ export interface Penandatangan {
     periode_mulai?: string;
     periode_selesai?: string;
     created_at?: string;
-    pangkat?: Pangkat;
-    golongan?: Golongan;
+    pangkat?: RefPangkat;
+    golongan?: RefGolongan;
     instansi?: Instansi;
 }

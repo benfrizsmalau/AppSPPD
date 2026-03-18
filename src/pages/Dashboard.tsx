@@ -1,510 +1,727 @@
-import React, { useMemo } from 'react';
-import { usePegawai } from '../hooks/usePegawai';
-import { useSPT } from '../hooks/useSPT';
-import { useSPPD } from '../hooks/useSPPD';
-import { useAuth } from '../hooks/useAuth';
+// =================================================================
+// SiSPPD v2.1 — Dashboard (Module 14)
+// =================================================================
+import React, { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   Users,
   FileText,
-  Map,
-  ChevronRight,
-  Sparkles,
+  Plane,
+  Edit,
   Clock,
-  Calendar,
-  Plus,
-  ArrowUpRight
+  AlertTriangle,
+  Settings,
+  CheckCircle,
+  TrendingUp,
+  ArrowRight,
+  BarChart2,
+  RefreshCw,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { format, isSameMonth } from 'date-fns';
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Cell,
+} from 'recharts';
+import { format } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
+import type {
+  DashboardStats,
+  MonthlyTrend,
+  AlertInfo,
+  SPT,
+  SPPD,
+} from '../types';
 
+// ─── Custom Counter Hook ────────────────────────────────────────
+function useCountUp(target: number, duration = 1000): number {
+  const [count, setCount] = useState(0);
+  const rafRef = useRef<number | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (target === 0) { setCount(0); return; }
+    startTimeRef.current = null;
+
+    const step = (timestamp: number) => {
+      if (!startTimeRef.current) startTimeRef.current = timestamp;
+      const elapsed = timestamp - startTimeRef.current;
+      const progress = Math.min(elapsed / duration, 1);
+      // Ease-out cubic
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setCount(Math.round(eased * target));
+      if (progress < 1) {
+        rafRef.current = requestAnimationFrame(step);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(step);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [target, duration]);
+
+  return count;
+}
+
+// ─── Stat Card ──────────────────────────────────────────────────
+interface StatCardProps {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+  iconBg: string;
+  iconColor: string;
+  loading?: boolean;
+  to?: string;
+}
+
+const StatCard: React.FC<StatCardProps> = ({
+  label, value, icon, iconBg, iconColor, loading, to,
+}) => {
+  const displayVal = useCountUp(loading ? 0 : value);
+  const content = (
+    <div className="stat-card flex items-center gap-4 hover:-translate-y-0.5 transition-transform duration-200">
+      <div className={`stat-icon ${iconBg}`} style={{ color: iconColor }}>
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        {loading ? (
+          <>
+            <div className="skeleton h-8 w-16 mb-1" />
+            <div className="skeleton h-3 w-28" />
+          </>
+        ) : (
+          <>
+            <div className="stat-value">{displayVal.toLocaleString('id-ID')}</div>
+            <div className="stat-label">{label}</div>
+          </>
+        )}
+      </div>
+      {to && !loading && (
+        <ArrowRight size={16} className="text-slate-300 flex-shrink-0" />
+      )}
+    </div>
+  );
+
+  if (to && !loading) return <Link to={to} className="block no-underline">{content}</Link>;
+  return content;
+};
+
+// ─── Status Badge ────────────────────────────────────────────────
+type DocStatus = SPT['status'];
+const STATUS_CLASS: Record<DocStatus, string> = {
+  Draft: 'status-draft',
+  'Menunggu Persetujuan': 'status-pending',
+  Final: 'status-final',
+  Printed: 'status-printed',
+  Completed: 'status-completed',
+  Cancelled: 'status-cancelled',
+  Expired: 'status-expired',
+};
+
+const StatusBadge: React.FC<{ status: DocStatus }> = ({ status }) => (
+  <span className={STATUS_CLASS[status] ?? 'badge badge-slate'}>{status}</span>
+);
+
+// ─── Skeleton helpers ────────────────────────────────────────────
+const SkeletonRow: React.FC = () => (
+  <tr>
+    {[120, 180, 100, 80].map((w, i) => (
+      <td key={i} className="px-4 py-3">
+        <div className={`skeleton h-4`} style={{ width: w }} />
+      </td>
+    ))}
+  </tr>
+);
+
+// ─── Recharts custom tooltip ────────────────────────────────────
+interface TooltipPayload {
+  name: string;
+  value: number;
+  color: string;
+}
+interface ChartTooltipProps {
+  active?: boolean;
+  payload?: TooltipPayload[];
+  label?: string;
+}
+const ChartTooltip: React.FC<ChartTooltipProps> = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-white border border-slate-100 rounded-xl shadow-lg px-4 py-3 text-sm">
+      <p className="font-semibold text-slate-700 mb-2">{label}</p>
+      {payload.map((p) => (
+        <div key={p.name} className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: p.color }} />
+          <span className="text-slate-500">{p.name}:</span>
+          <span className="font-bold text-slate-800">{p.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ─── Alert Banner ────────────────────────────────────────────────
+const AlertBanner: React.FC<{ alert: AlertInfo }> = ({ alert }) => {
+  const cls = `alert alert-${alert.type}`;
+  const icons: Record<AlertInfo['type'], React.ReactNode> = {
+    warning: <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />,
+    danger:  <AlertTriangle size={18} className="flex-shrink-0 mt-0.5" />,
+    success: <CheckCircle  size={18} className="flex-shrink-0 mt-0.5" />,
+    info:    <Settings     size={18} className="flex-shrink-0 mt-0.5" />,
+  };
+  return (
+    <div className={cls}>
+      {icons[alert.type]}
+      <div className="flex-1">
+        <span className="font-semibold">{alert.title}</span>
+        {alert.message && <span className="ml-1 font-normal opacity-80">{alert.message}</span>}
+      </div>
+      {alert.action && (
+        <Link
+          to={alert.action.href}
+          className="btn btn-sm btn-secondary flex-shrink-0 text-xs"
+        >
+          {alert.action.label}
+        </Link>
+      )}
+    </div>
+  );
+};
+
+// ─── Top Employees Bar Chart ─────────────────────────────────────
+interface TopEmployee {
+  nama: string;
+  jumlah: number;
+}
+const TOP_COLORS = ['#2563EB', '#3B82F6', '#60A5FA', '#93C5FD', '#BFDBFE'];
+
+const TopEmployeesChart: React.FC<{ data: TopEmployee[]; loading: boolean }> = ({ data, loading }) => (
+  <div className="card">
+    <div className="card-header">
+      <div className="flex items-center gap-2">
+        <BarChart2 size={18} className="text-violet-500" />
+        <h3 className="text-sm font-bold text-slate-800">Top 5 Pegawai Perjalanan Dinas</h3>
+      </div>
+    </div>
+    <div className="card-body">
+      {loading ? (
+        <div className="space-y-3">
+          {[1,2,3,4,5].map(i => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="skeleton h-4 w-32" />
+              <div className="skeleton h-4 flex-1" style={{ opacity: 1 - i * 0.15 }} />
+            </div>
+          ))}
+        </div>
+      ) : data.length === 0 ? (
+        <div className="empty-state py-8">
+          <p className="empty-state-desc">Belum ada data perjalanan dinas.</p>
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={data} layout="vertical" margin={{ left: 0, right: 24, top: 4, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#F1F5F9" />
+            <XAxis type="number" tick={{ fontSize: 11, fill: '#94A3B8' }} allowDecimals={false} />
+            <YAxis
+              type="category"
+              dataKey="nama"
+              width={110}
+              tick={{ fontSize: 11, fill: '#475569' }}
+              tickFormatter={(v: string) => v.length > 14 ? v.slice(0, 13) + '…' : v}
+            />
+            <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(37,99,235,0.06)' }} />
+            <Bar dataKey="jumlah" name="Perjalanan" radius={[0, 6, 6, 0]}>
+              {data.map((_, i) => (
+                <Cell key={i} fill={TOP_COLORS[i % TOP_COLORS.length]} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  </div>
+);
+
+// ─── Main Dashboard Component ────────────────────────────────────
 const Dashboard: React.FC = () => {
-  const { profile } = useAuth();
-  const { pegawai } = usePegawai();
-  const { spts } = useSPT();
-  const { sppds } = useSPPD();
+  const { profile, tenantId } = useAuth();
+  const navigate = useNavigate();
+
+  // ── Data Fetching ─────────────────────────────────────────────
+  const { data: statsData, isLoading: statsLoading, error: statsError } = useQuery<DashboardStats>({
+    queryKey: ['dashboard-stats', tenantId],
+    queryFn: async () => {
+      if (!tenantId) throw new Error('No tenant');
+      const { data, error } = await supabase.rpc('get_dashboard_stats', { p_tenant_id: tenantId });
+      if (error) throw error;
+      return data as DashboardStats;
+    },
+    enabled: !!tenantId,
+    staleTime: 60_000,
+  });
+
+  const { data: trendData = [], isLoading: trendLoading } = useQuery<MonthlyTrend[]>({
+    queryKey: ['monthly-trend', tenantId],
+    queryFn: async () => {
+      if (!tenantId) throw new Error('No tenant');
+      const { data, error } = await supabase.rpc('get_monthly_trend', { p_tenant_id: tenantId });
+      if (error) throw error;
+      return data as MonthlyTrend[];
+    },
+    enabled: !!tenantId,
+    staleTime: 300_000,
+  });
+
+  const { data: recentSPTs = [], isLoading: recentLoading } = useQuery<SPT[]>({
+    queryKey: ['recent-spt', tenantId],
+    queryFn: async () => {
+      if (!tenantId) throw new Error('No tenant');
+      const { data, error } = await supabase
+        .from('spt')
+        .select('id, nomor_spt, tanggal_penetapan, tujuan_kegiatan, status, created_at, instansi_id')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return (data ?? []) as SPT[];
+    },
+    enabled: !!tenantId,
+    staleTime: 60_000,
+  });
+
+  const { data: recentSPPDs = [], isLoading: recentSppdLoading } = useQuery<SPPD[]>({
+    queryKey: ['recent-sppd', tenantId],
+    queryFn: async () => {
+      if (!tenantId) throw new Error('No tenant');
+      const { data, error } = await supabase
+        .from('sppd')
+        .select('id, nomor_sppd, tanggal_penerbitan, maksud_perjalanan, status, created_at, pegawai_id')
+        .eq('tenant_id', tenantId)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return (data ?? []) as SPPD[];
+    },
+    enabled: !!tenantId,
+    staleTime: 60_000,
+  });
+
+  // Setup checks for alert banners
+  const { data: instansiList = [] } = useQuery({
+    queryKey: ['instansi-check', tenantId],
+    queryFn: async () => {
+      if (!tenantId) return [];
+      const { data } = await supabase
+        .from('instansi')
+        .select('id, nama_lengkap, logo_path, is_primary')
+        .eq('tenant_id', tenantId)
+        .eq('is_primary', true)
+        .limit(1);
+      return data ?? [];
+    },
+    enabled: !!tenantId,
+    staleTime: 300_000,
+  });
+
+  const { data: penandatanganList = [] } = useQuery({
+    queryKey: ['penandatangan-check', tenantId],
+    queryFn: async () => {
+      if (!tenantId) return [];
+      const { data } = await supabase
+        .from('penandatangan')
+        .select('id, status_aktif')
+        .eq('tenant_id', tenantId)
+        .eq('status_aktif', true)
+        .limit(1);
+      return data ?? [];
+    },
+    enabled: !!tenantId,
+    staleTime: 300_000,
+  });
+
+  const { data: penomoranList = [] } = useQuery({
+    queryKey: ['penomoran-check', tenantId],
+    queryFn: async () => {
+      if (!tenantId) return [];
+      const { data } = await supabase
+        .from('setting_penomoran')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .limit(1);
+      return data ?? [];
+    },
+    enabled: !!tenantId,
+    staleTime: 300_000,
+  });
+
+  const { data: oldDrafts = [] } = useQuery({
+    queryKey: ['old-drafts', tenantId],
+    queryFn: async () => {
+      if (!tenantId) return [];
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
+      const { data } = await supabase
+        .from('spt')
+        .select('id, created_at')
+        .eq('tenant_id', tenantId)
+        .eq('status', 'Draft')
+        .lt('created_at', cutoff.toISOString())
+        .limit(1);
+      return data ?? [];
+    },
+    enabled: !!tenantId,
+    staleTime: 300_000,
+  });
+
+  // Top employees
+  const { data: topEmployees = [], isLoading: topLoading } = useQuery<TopEmployee[]>({
+    queryKey: ['top-employees', tenantId],
+    queryFn: async () => {
+      if (!tenantId) throw new Error('No tenant');
+      const { data, error } = await supabase
+        .from('spt_pegawai')
+        .select('pegawai_id, pegawai:pegawai(nama_lengkap)')
+        .eq('pegawai.tenant_id' as string, tenantId)
+        .limit(200);
+      if (error) throw error;
+      // Aggregate client-side
+      const counts: Record<number, { nama: string; jumlah: number }> = {};
+      (data ?? []).forEach((row) => {
+        const r = row as { pegawai_id: number; pegawai: { nama_lengkap: string } | { nama_lengkap: string }[] | null };
+        const pegawai = r.pegawai;
+        if (!pegawai) return;
+        const nama = Array.isArray(pegawai) ? pegawai[0]?.nama_lengkap : (pegawai as { nama_lengkap: string }).nama_lengkap;
+        if (!nama) return;
+        if (!counts[r.pegawai_id]) counts[r.pegawai_id] = { nama, jumlah: 0 };
+        counts[r.pegawai_id].jumlah++;
+      });
+      return Object.values(counts)
+        .sort((a, b) => b.jumlah - a.jumlah)
+        .slice(0, 5);
+    },
+    enabled: !!tenantId,
+    staleTime: 300_000,
+  });
+
+  // ── Computed values ───────────────────────────────────────────
+  const stats = statsData ?? {
+    total_pegawai_aktif: 0,
+    spt_bulan_ini: 0,
+    sppd_bulan_ini: 0,
+    total_draft: 0,
+    menunggu_persetujuan: 0,
+  };
+
+  const alerts: AlertInfo[] = [];
+  const primaryInstansi = instansiList[0] as { logo_path?: string; nama_lengkap?: string } | undefined;
+  if (!primaryInstansi || !primaryInstansi.logo_path || !primaryInstansi.nama_lengkap) {
+    alerts.push({
+      type: 'warning',
+      title: 'Setup Institusi Belum Lengkap',
+      message: 'Logo dan nama instansi belum dikonfigurasi.',
+      action: { label: 'Setup Institusi', href: '/settings' },
+    });
+  }
+  if (penandatanganList.length === 0) {
+    alerts.push({
+      type: 'warning',
+      title: 'Penandatangan Tidak Aktif',
+      message: 'Belum ada penandatangan aktif yang ditetapkan.',
+      action: { label: 'Tambah Penandatangan', href: '/settings' },
+    });
+  }
+  if (penomoranList.length === 0) {
+    alerts.push({
+      type: 'info',
+      title: 'Penomoran Belum Dikonfigurasi',
+      message: 'Format nomor dokumen SPT/SPPD belum diatur.',
+      action: { label: 'Konfigurasi Penomoran', href: '/settings' },
+    });
+  }
+  if (oldDrafts.length > 0) {
+    alerts.push({
+      type: 'warning',
+      title: 'Draft Lama Terdeteksi',
+      message: 'Terdapat draft SPT yang sudah lebih dari 30 hari.',
+      action: { label: 'Lihat Draft', href: '/spt?status=Draft' },
+    });
+  }
+
+  // Merge recent docs
+  const recentAllLoading = recentLoading || recentSppdLoading;
+  const recentDocs = [
+    ...recentSPTs.map(s => ({
+      id: s.id,
+      type: 'SPT' as const,
+      nomor: s.nomor_spt ?? `DRAFT-SPT-${s.id}`,
+      deskripsi: Array.isArray(s.tujuan_kegiatan) ? s.tujuan_kegiatan[0] : '',
+      status: s.status,
+      tanggal: s.created_at,
+      href: `/spt/${s.id}`,
+    })),
+    ...recentSPPDs.map(s => ({
+      id: s.id,
+      type: 'SPPD' as const,
+      nomor: s.nomor_sppd ?? `DRAFT-SPPD-${s.id}`,
+      deskripsi: s.maksud_perjalanan,
+      status: s.status,
+      tanggal: s.created_at,
+      href: `/sppd/${s.id}`,
+    })),
+  ]
+    .sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime())
+    .slice(0, 10);
+
+  // Chart data — use 12-month trend
+  const chartData = trendData.map(m => ({
+    name: m.nama_bulan.slice(0, 3),
+    SPT: m.jumlah_spt,
+    SPPD: m.jumlah_sppd,
+  }));
 
   const now = new Date();
 
-  const stats = useMemo(() => {
-    const activePegawai = pegawai.filter(p => p.status_aktif).length;
-    const sptsThisMonth = spts.filter(s => isSameMonth(new Date(s.tanggal_penetapan), now)).length;
-    const sppdsThisMonth = sppds.filter(s => isSameMonth(new Date(s.tanggal_berangkat), now)).length;
-    const draftCount = spts.filter(s => s.status === 'Draft').length + sppds.filter(s => s.status === 'Draft').length;
-
-    return { activePegawai, sptsThisMonth, sppdsThisMonth, draftCount };
-  }, [pegawai, spts, sppds, now]);
-
-  const recentItems = useMemo(() => {
-    const combined = [
-      ...spts.map(s => ({ ...s, type: 'SPT', date: s.created_at || s.tanggal_penetapan })),
-      ...sppds.map(s => ({ ...s, type: 'SPPD', date: s.created_at || s.tanggal_berangkat }))
-    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-    return combined.slice(0, 5);
-  }, [spts, sppds]);
-
+  // ── Render ────────────────────────────────────────────────────
   return (
-    <div className="dashboard-wrapper">
-      <header className="dashboard-header glass-effect">
-        <div className="welcome-box">
-          <div className="spark-icon">
-            <Sparkles size={20} color="var(--p-accent)" />
-          </div>
-          <div>
-            <h1>Halo, {profile?.nama_lengkap || 'User'}</h1>
-            <p>Selamat datang kembali di Pusat Kendali Administrasi SiSPPD.</p>
-          </div>
-        </div>
-        <div className="header-date">
-          <div className="date-icon-box">
-            <Calendar size={18} />
-          </div>
-          <div className="date-text">
-            <span>{format(now, 'EEEE', { locale: localeID })}</span>
-            <strong>{format(now, 'dd MMMM yyyy', { locale: localeID })}</strong>
-          </div>
-        </div>
-      </header>
+    <div className="page-enter flex flex-col gap-6">
 
-      <section className="stats-container">
-        <div className="stat-tile">
-          <div className="stat-tile-top">
-            <div className="stat-tile-icon blue">
-              <Users size={22} />
-            </div>
-            <div className="stat-tile-badge">Aktif</div>
-          </div>
-          <div className="stat-tile-body">
-            <div className="stat-tile-value">{stats.activePegawai}</div>
-            <div className="stat-tile-label">Total Pegawai</div>
-          </div>
-          <div className="stat-tile-footer">
-            <span>Data master terverifikasi</span>
-            <ArrowUpRight size={14} />
-          </div>
+      {/* ── Page Header ─────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="page-title">
+            Selamat datang, {profile?.nama_lengkap?.split(' ')[0] ?? 'Pengguna'} 👋
+          </h1>
+          <p className="page-subtitle">
+            {format(now, 'EEEE, dd MMMM yyyy', { locale: localeID })}
+          </p>
         </div>
-
-        <div className="stat-tile">
-          <div className="stat-tile-top">
-            <div className="stat-tile-icon indigo">
-              <FileText size={22} />
-            </div>
-            <Link to="/spt" className="stat-tile-link"><ChevronRight size={16} /></Link>
-          </div>
-          <div className="stat-tile-body">
-            <div className="stat-tile-value">{stats.sptsThisMonth}</div>
-            <div className="stat-tile-label">SPT Terbit (Bulan Ini)</div>
-          </div>
-          <div className="stat-tile-footer">
-            <span>Siap cetak dokumen</span>
-          </div>
-        </div>
-
-        <div className="stat-tile">
-          <div className="stat-tile-top">
-            <div className="stat-tile-icon emerald">
-              <Map size={22} />
-            </div>
-            <Link to="/sppd" className="stat-tile-link"><ChevronRight size={16} /></Link>
-          </div>
-          <div className="stat-tile-body">
-            <div className="stat-tile-value">{stats.sppdsThisMonth}</div>
-            <div className="stat-tile-label">SPPD Terbit (Bulan Ini)</div>
-          </div>
-          <div className="stat-tile-footer">
-            <span>Penugasan dinas aktif</span>
-          </div>
-        </div>
-
-        <div className="stat-tile">
-          <div className="stat-tile-top">
-            <div className="stat-tile-icon sunset">
-              <Clock size={22} />
-            </div>
-            <div className="stat-tile-badge warning">Perlu Atensi</div>
-          </div>
-          <div className="stat-tile-body">
-            <div className="stat-tile-value">{stats.draftCount}</div>
-            <div className="stat-tile-label">Draft Menunggu Final</div>
-          </div>
-        </div>
-      </section>
-
-      <section className="analytics-overview glass-effect">
-        <div className="analytics-header">
-          <h3>Statistik & Tren Perjalanan</h3>
-          <div className="period-selector">Bulan Terakhir</div>
-        </div>
-        <div className="analytics-grid">
-          <div className="chart-item">
-            <span className="chart-label">Frekuensi SPT</span>
-            <div className="simple-bar-chart">
-              <div className="bar" style={{ height: '40%' }}></div>
-              <div className="bar" style={{ height: '60%' }}></div>
-              <div className="bar" style={{ height: '35%' }}></div>
-              <div className="bar" style={{ height: '85%' }}></div>
-              <div className="bar active" style={{ height: '95%' }}></div>
-            </div>
-            <span className="chart-footer">Meningkat 15% dari bulan lalu</span>
-          </div>
-          <div className="chart-item">
-            <span className="chart-label">Realisasi SPPD</span>
-            <div className="simple-bar-chart">
-              <div className="bar" style={{ height: '30%', background: 'var(--p-accent)' }}></div>
-              <div className="bar" style={{ height: '50%', background: 'var(--p-accent)' }}></div>
-              <div className="bar" style={{ height: '45%', background: 'var(--p-accent)' }}></div>
-              <div className="bar" style={{ height: '70%', background: 'var(--p-accent)' }}></div>
-              <div className="bar active" style={{ height: '80%', background: 'var(--p-accent)' }}></div>
-            </div>
-            <span className="chart-footer">Target tercapai 82%</span>
-          </div>
-        </div>
-      </section>
-
-      <div className="dashboard-main-grid">
-        <div className="activity-section">
-          <div className="section-card">
-            <div className="section-header">
-              <div className="header-info">
-                <h3>Aktivitas Dokumentasi</h3>
-                <p>Ulasan riwayat pembuatan dokumen terbaru</p>
-              </div>
-              <Link to="/riwayat" className="btn btn-outline btn-sm">
-                Lihat Semua
-              </Link>
-            </div>
-            <div className="activity-list-v2">
-              {recentItems.length === 0 ? (
-                <div className="empty-activity">
-                  <div className="empty-icon"><Clock size={32} /></div>
-                  <p>Belum ada aktivitas dokumen tercatat hari ini.</p>
-                </div>
-              ) : recentItems.map((item: any, idx) => (
-                <div key={idx} className="activity-card-v2">
-                  <div className={`activity-indicator ${item.type.toLowerCase()}`}>
-                    {item.type === 'SPT' ? <FileText size={16} /> : <Map size={16} />}
-                  </div>
-                  <div className="activity-info">
-                    <div className="activity-top">
-                      <span className="activity-type-tag">{item.type}</span>
-                      <span className="activity-time-tag">{format(new Date(item.date), 'HH:mm', { locale: localeID })}</span>
-                    </div>
-                    <p className="activity-desc"><strong>{item.nomor_spt || item.nomor_sppd}</strong></p>
-                    <p className="activity-subdesc">{item.tujuan_kegiatan?.[0] || item.maksud_perjalanan}</p>
-                  </div>
-                  <Link to={`/${item.type.toLowerCase()}`} className="activity-action-btn">
-                    <ChevronRight size={18} />
-                  </Link>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="quick-action-section">
-          <div className="section-card">
-            <h3>Aksi Cepat</h3>
-            <div className="quick-grid">
-              <Link to="/spt/new" className="quick-tile purple">
-                <div className="quick-icon"><FileText size={24} /></div>
-                <span>Buat SPT Baru</span>
-              </Link>
-              <Link to="/sppd/new" className="quick-tile indigo">
-                <div className="quick-icon"><Map size={24} /></div>
-                <span>Buat SPPD Baru</span>
-              </Link>
-              <Link to="/pegawai" className="quick-tile slate">
-                <div className="quick-icon"><Users size={24} /></div>
-                <span>Kelola Pegawai</span>
-              </Link>
-              <Link to="/settings" className="quick-tile deep-blue">
-                <div className="quick-icon"><Plus size={24} /></div>
-                <span>Set Penomoran</span>
-              </Link>
-            </div>
-          </div>
+        <div className="flex gap-2">
+          <Link to="/spt/new" className="btn btn-primary btn-sm">
+            <FileText size={15} /> Buat SPT
+          </Link>
+          <Link to="/sppd/new" className="btn btn-secondary btn-sm">
+            <Plane size={15} /> Buat SPPD
+          </Link>
         </div>
       </div>
 
-      <style>{`
-        .dashboard-wrapper {
-          display: flex;
-          flex-direction: column;
-          gap: 32px;
-        }
-        .dashboard-header {
-          padding: 32px;
-          border-radius: var(--radius-p);
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          background: linear-gradient(to right, white, #f1f5f9);
-        }
-        .welcome-box {
-          display: flex;
-          align-items: center;
-          gap: 20px;
-        }
-        .spark-icon {
-          width: 48px;
-          height: 48px;
-          background: #eff6ff;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .welcome-box h1 {
-          font-size: 28px;
-          margin: 0;
-          color: var(--p-primary);
-        }
-        .welcome-box p {
-          color: var(--p-text-muted);
-          margin: 4px 0 0;
-          font-weight: 500;
-        }
-        .header-date {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          background: white;
-          padding: 8px 16px;
-          border-radius: 12px;
-          border: 1px solid var(--p-border);
-        }
-        .date-icon-box {
-          color: var(--p-accent);
-        }
-        .date-text {
-          display: flex;
-          flex-direction: column;
-          line-height: 1.2;
-        }
-        .date-text span {
-          font-size: 10px;
-          text-transform: uppercase;
-          font-weight: 800;
-          color: var(--p-text-muted);
-        }
-        .date-text strong {
-          font-size: 14px;
-        }
+      {/* ── Alert Banners ────────────────────────────────────── */}
+      {alerts.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {alerts.map((a, i) => <AlertBanner key={i} alert={a} />)}
+        </div>
+      )}
 
-        /* Stats Blocks */
-        .stats-container {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 24px;
-        }
-        .stat-tile {
-          background: white;
-          border: 1px solid var(--p-border);
-          border-radius: var(--radius-p);
-          padding: 24px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          transition: var(--transition-p);
-        }
-        .stat-tile:hover {
-          transform: translateY(-4px);
-          box-shadow: var(--shadow-p-lg);
-        }
-        .stat-tile-top {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .stat-tile-icon {
-          width: 44px;
-          height: 44px;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .stat-tile-icon.blue { background: #e0f2fe; color: #0369a1; }
-        .stat-tile-icon.indigo { background: #e0e7ff; color: #4338ca; }
-        .stat-tile-icon.emerald { background: #dcfce7; color: #065f46; }
-        .stat-tile-icon.sunset { background: #ffedd5; color: #9a3412; }
-        
-        .stat-tile-badge {
-          font-size: 10px;
-          font-weight: 800;
-          background: #f1f5f9;
-          padding: 4px 8px;
-          border-radius: 4px;
-          text-transform: uppercase;
-        }
-        .stat-tile-badge.warning { background: #fee2e2; color: #991b1b; }
-        
-        .stat-tile-value {
-          font-family: var(--font-heading);
-          font-size: 36px;
-          font-weight: 800;
-          line-height: 1;
-          color: var(--p-primary);
-        }
-        .stat-tile-label {
-          font-size: 13px;
-          font-weight: 600;
-          color: var(--p-text-muted);
-          margin-top: 4px;
-        }
-        .stat-tile-footer {
-          margin-top: auto;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          font-size: 11px;
-          font-weight: 700;
-          color: var(--p-text-muted);
-          padding-top: 12px;
-          border-top: 1px solid #f1f5f9;
-        }
+      {statsError && (
+        <div className="alert alert-danger">
+          <AlertTriangle size={18} className="flex-shrink-0" />
+          <span>Gagal memuat statistik dashboard. Periksa koneksi Supabase.</span>
+          <button
+            className="btn btn-sm btn-secondary ml-auto"
+            onClick={() => window.location.reload()}
+          >
+            <RefreshCw size={14} /> Coba lagi
+          </button>
+        </div>
+      )}
 
-        /* Main Grid */
-        .dashboard-main-grid {
-          display: grid;
-          grid-template-columns: 1.8fr 1fr;
-          gap: 24px;
-        }
-        .section-card {
-          background: white;
-          border: 1px solid var(--p-border);
-          border-radius: var(--radius-p);
-          padding: 24px;
-          height: 100%;
-        }
-        .section-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          margin-bottom: 24px;
-        }
-        .section-header h3 { font-size: 18px; margin: 0; }
-        .section-header p { font-size: 13px; color: var(--p-text-muted); margin: 4px 0 0; }
-        
-        .activity-card-v2 {
-          display: flex;
-          align-items: flex-start;
-          gap: 16px;
-          padding: 16px;
-          border-radius: 12px;
-          transition: var(--transition-p);
-          border: 1px solid transparent;
-        }
-        .activity-card-v2:hover {
-          background: #f8fafc;
-          border-color: var(--p-border);
-        }
-        .activity-indicator {
-          width: 36px;
-          height: 36px;
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-        .activity-indicator.spt { background: #eff6ff; color: #2563eb; }
-        .activity-indicator.sppd { background: #ecfdf5; color: #10b981; }
-        
-        .activity-info { flex: 1; }
-        .activity-top { display: flex; justify-content: space-between; margin-bottom: 2px; }
-        .activity-type-tag { font-size: 10px; font-weight: 800; color: var(--p-text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-        .activity-time-tag { font-size: 11px; font-weight: 600; color: var(--p-text-muted); }
-        .activity-desc { font-size: 14px; margin: 0; color: var(--p-primary); }
-        .activity-subdesc { font-size: 12px; color: var(--p-text-muted); margin: 2px 0 0; }
-        
-        .activity-action-btn {
-          align-self: center;
-          color: var(--p-text-muted);
-          transition: var(--transition-p);
-        }
-        .activity-action-btn:hover { color: var(--p-accent); transform: translateX(3px); }
+      {/* ── Stat Cards ───────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+        <StatCard
+          label="Total Pegawai Aktif"
+          value={stats.total_pegawai_aktif}
+          icon={<Users size={22} />}
+          iconBg="bg-blue-50"
+          iconColor="#2563EB"
+          loading={statsLoading}
+          to="/pegawai"
+        />
+        <StatCard
+          label="SPT Bulan Ini"
+          value={stats.spt_bulan_ini}
+          icon={<FileText size={22} />}
+          iconBg="bg-emerald-50"
+          iconColor="#10B981"
+          loading={statsLoading}
+          to="/spt"
+        />
+        <StatCard
+          label="SPPD Bulan Ini"
+          value={stats.sppd_bulan_ini}
+          icon={<Plane size={22} />}
+          iconBg="bg-violet-50"
+          iconColor="#7C3AED"
+          loading={statsLoading}
+          to="/sppd"
+        />
+        <StatCard
+          label="Total Draft"
+          value={stats.total_draft}
+          icon={<Edit size={22} />}
+          iconBg="bg-amber-50"
+          iconColor="#D97706"
+          loading={statsLoading}
+          to="/spt?status=Draft"
+        />
+        <StatCard
+          label="Menunggu Persetujuan"
+          value={stats.menunggu_persetujuan}
+          icon={<Clock size={22} />}
+          iconBg="bg-rose-50"
+          iconColor="#F43F5E"
+          loading={statsLoading}
+          to="/spt?status=Menunggu+Persetujuan"
+        />
+      </div>
 
-        .quick-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-top: 16px;
-        }
-        .quick-tile {
-          padding: 20px;
-          border-radius: 12px;
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          text-decoration: none;
-          transition: var(--transition-p);
-        }
-        .quick-tile:hover { transform: scale(1.02); }
-        .quick-tile.purple { background: #f5f3ff; color: #5b21b6; }
-        .quick-tile.indigo { background: #eef2ff; color: #3730a3; }
-        .quick-tile.slate { background: #f8fafc; color: #334155; }
-        .quick-tile.deep-blue { background: #f0f9ff; color: #075985; }
-        
-        .quick-icon {
-          width: 40px;
-          height: 40px;
-          background: rgba(255,255,255,0.8);
-          border-radius: 10px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .quick-tile span { font-size: 13px; font-weight: 700; }
+      {/* ── Charts Row ───────────────────────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Trend Line Chart */}
+        <div className="card lg:col-span-2">
+          <div className="card-header">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={18} className="text-blue-500" />
+              <h3 className="text-sm font-bold text-slate-800">Tren 12 Bulan — SPT & SPPD</h3>
+            </div>
+          </div>
+          <div className="card-body">
+            {trendLoading ? (
+              <div className="space-y-2">
+                <div className="skeleton h-48 w-full" />
+              </div>
+            ) : chartData.length === 0 ? (
+              <div className="empty-state py-8">
+                <p className="empty-state-desc">Belum ada data tren untuk ditampilkan.</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: -10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fontSize: 11, fill: '#94A3B8' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: '#94A3B8' }}
+                    axisLine={false}
+                    tickLine={false}
+                    allowDecimals={false}
+                  />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Legend
+                    wrapperStyle={{ fontSize: 12, paddingTop: 12 }}
+                    iconType="circle"
+                    iconSize={8}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="SPT"
+                    name="SPT"
+                    stroke="#2563EB"
+                    strokeWidth={2.5}
+                    dot={{ r: 3, fill: '#2563EB', strokeWidth: 0 }}
+                    activeDot={{ r: 5 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="SPPD"
+                    name="SPPD"
+                    stroke="#7C3AED"
+                    strokeWidth={2.5}
+                    dot={{ r: 3, fill: '#7C3AED', strokeWidth: 0 }}
+                    activeDot={{ r: 5 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
 
-        /* Analytics Section */
-        .analytics-overview {
-            padding: 24px;
-            border-radius: var(--radius-p);
-            border: 1px solid var(--p-border);
-            background: white;
-        }
-        .analytics-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 24px;
-        }
-        .analytics-header h3 { font-size: 16px; margin: 0; }
-        .period-selector { font-size: 12px; font-weight: 700; color: var(--p-accent); cursor: pointer; }
-        
-        .analytics-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 40px;
-        }
-        .chart-item {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-        .chart-label { font-size: 12px; font-weight: 700; color: var(--p-text-muted); text-transform: uppercase; }
-        .simple-bar-chart {
-            height: 100px;
-            display: flex;
-            align-items: flex-end;
-            gap: 12px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid var(--p-border);
-        }
-        .bar {
-            flex: 1;
-            background: #e2e8f0;
-            border-radius: 4px 4px 0 0;
-            transition: all 0.3s;
-        }
-        .bar.active {
-            background: var(--p-primary);
-        }
-        .chart-footer { font-size: 11px; color: var(--p-text-muted); font-weight: 600; }
-      `}</style>
-    </div >
+        {/* Top Employees */}
+        <TopEmployeesChart data={topEmployees} loading={topLoading} />
+      </div>
+
+      {/* ── Recent Documents Table ───────────────────────────── */}
+      <div className="card">
+        <div className="card-header">
+          <div className="flex items-center gap-2">
+            <FileText size={18} className="text-slate-400" />
+            <h3 className="text-sm font-bold text-slate-800">Dokumen Terbaru</h3>
+          </div>
+          <Link to="/riwayat" className="btn btn-ghost btn-sm text-xs">
+            Lihat semua <ArrowRight size={13} />
+          </Link>
+        </div>
+
+        <div className="table-wrap rounded-t-none border-0 border-t border-slate-100">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Jenis</th>
+                <th>Nomor Dokumen</th>
+                <th>Keterangan</th>
+                <th>Tanggal</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentAllLoading ? (
+                Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)
+              ) : recentDocs.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center py-12 text-slate-400 text-sm">
+                    Belum ada dokumen yang dibuat.
+                  </td>
+                </tr>
+              ) : (
+                recentDocs.map(doc => (
+                  <tr
+                    key={`${doc.type}-${doc.id}`}
+                    className="cursor-pointer"
+                    onClick={() => navigate(doc.href)}
+                  >
+                    <td>
+                      <span className={`badge ${doc.type === 'SPT' ? 'badge-blue' : 'badge-violet'}`}>
+                        {doc.type}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="doc-number text-slate-800">{doc.nomor}</span>
+                    </td>
+                    <td>
+                      <span className="text-slate-600 truncate-2 max-w-xs block">
+                        {doc.deskripsi || '—'}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap text-slate-500 text-xs">
+                      {format(new Date(doc.tanggal), 'dd MMM yyyy', { locale: localeID })}
+                    </td>
+                    <td>
+                      <StatusBadge status={doc.status} />
+                    </td>
+                    <td>
+                      <ArrowRight size={14} className="text-slate-300" />
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 };
 

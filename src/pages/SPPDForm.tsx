@@ -1,522 +1,923 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { useSPPD } from '../hooks/useSPPD';
-import { useSPT } from '../hooks/useSPT';
-import { usePegawai } from '../hooks/usePegawai';
-import { useSettings } from '../hooks/useSettings';
-import { useReferensi } from '../hooks/useReferensi';
-import type { SPPD } from '../types/sppd';
-import MultiSelectPegawai from '../components/MultiSelectPegawai';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useForm, useFieldArray, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { addDays, format, parseISO, isAfter } from 'date-fns';
+import { id as localeID } from 'date-fns/locale';
 import {
-    ArrowLeft,
-    Save,
-    FileCheck,
-    Calendar,
-    MapPin,
-    Plane,
-    Link as LinkIcon,
-    ChevronRight,
-    Info,
-    Users,
-    Briefcase,
-    Loader2
+  ArrowLeft, Save, FileCheck, Plus, Trash2, GripVertical, Info,
+  AlertTriangle, Loader2, User, CheckCircle2, ChevronRight,
 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
+import type {
+  SPPD, SPPDPengikut, Pegawai, Penandatangan,
+  MataAnggaran, Instansi, RefTingkatPerjalanan, RefAlatAngkut, SPT, DocumentStatus,
+} from '../types';
 
+// ── Zod Schema ───────────────────────────────────────────────────────────────
+const pengikutSchema = z.object({
+  tipe: z.enum(['pegawai', 'manual']),
+  pegawai_id: z.number().optional().nullable(),
+  nama: z.string().optional(),
+  umur: z.number().min(1).max(120).optional().nullable(),
+  keterangan: z.string().optional(),
+  urutan: z.number(),
+});
+
+const sppdSchema = z.object({
+  spt_id: z.number().optional().nullable(),
+  pegawai_id: z.number({ message: 'Pilih pegawai pelaksana' }),
+  pejabat_pemberi_perintah_id: z.number().optional().nullable(),
+  tingkat_perjalanan: z.string().optional(),
+  maksud_perjalanan: z.string().min(5, 'Isi maksud perjalanan minimal 5 karakter'),
+  alat_angkut: z.string().optional(),
+  tempat_berangkat: z.string().min(1, 'Wajib diisi'),
+  tempat_tujuan: z.string().min(1, 'Wajib diisi'),
+  lama_perjalanan: z.number().min(1).max(365),
+  tanggal_berangkat: z.string().min(1, 'Wajib diisi'),
+  tanggal_penerbitan: z.string().min(1, 'Wajib diisi'),
+  instansi_id: z.number().optional().nullable(),
+  mata_anggaran_id: z.number().optional().nullable(),
+  keterangan_lain: z.string().optional(),
+  penandatangan_id: z.number().optional().nullable(),
+  pengikut: z.array(pengikutSchema).max(3, 'Maksimal 3 pengikut'),
+});
+
+type FormValues = z.infer<typeof sppdSchema>;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function computeKembali(berangkat: string, lama: number): string {
+  try {
+    if (!berangkat || lama < 1) return '';
+    return format(addDays(parseISO(berangkat), lama - 1), 'yyyy-MM-dd');
+  } catch { return ''; }
+}
+
+function initials(name: string): string {
+  return name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
+}
+
+// ── Supabase fetch helpers ────────────────────────────────────────────────────
+async function fetchSPPDById(id: number) {
+  const { data, error } = await supabase
+    .from('sppd')
+    .select('*, pegawai:pegawai_id(*), penandatangan:penandatangan_id(*), sppd_pengikut(*)')
+    .eq('id', id)
+    .single();
+  if (error) throw error;
+  return data as SPPD & { sppd_pengikut: SPPDPengikut[] };
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 const SPPDForm: React.FC = () => {
-    const { id } = useParams();
-    const navigate = useNavigate();
-    const location = useLocation();
-    const queryParams = new URLSearchParams(location.search);
-    const fromSptId = queryParams.get('spt_id');
+  const { id } = useParams<{ id?: string }>();
+  const isEdit = !!id;
+  const navigate = useNavigate();
+  const { tenantId } = useAuth();
+  const queryClient = useQueryClient();
 
-    const { sppds, createSPPD, updateSPPD, generateSPPDNumber } = useSPPD();
-    const { spts } = useSPT();
-    const { pegawai: allPegawai } = usePegawai();
-    const { instansi, penandatangan } = useSettings();
-    const { tingkatPerjalanan, alatAngkut: listAlatAngkut, mataAnggaran: listAnggaran } = useReferensi();
+  const [activeSection, setActiveSection] = useState<1 | 2 | 3 | 4>(1);
+  const [showPengikutForm, setShowPengikutForm] = useState(false);
+  const [pengikutFormTipe, setPengikutFormTipe] = useState<'pegawai' | 'manual'>('pegawai');
+  const [pengikutPegawaiId, setPengikutPegawaiId] = useState<number | ''>('');
+  const [pengikutNama, setPengikutNama] = useState('');
+  const [pengikutUmur, setPengikutUmur] = useState<number | ''>('');
+  const [pengikutKet, setPengikutKet] = useState('');
+  const [overlapWarning, setOverlapWarning] = useState<string | null>(null);
 
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [selectedPengikutIds, setSelectedPengikutIds] = useState<number[]>([]);
+  // ── Remote data ────────────────────────────────────────────────────────────
+  const { data: existingSPPD, isLoading: loadingExisting } = useQuery({
+    queryKey: ['sppd-detail', id],
+    queryFn: () => fetchSPPDById(Number(id)),
+    enabled: isEdit,
+  });
 
-    const [formData, setFormData] = useState<Partial<SPPD>>({
-        nomor_sppd: '',
-        pejabat_pemberi_perintah_id: undefined,
-        tingkat_perjalanan: '',
-        tingkat_biaya_id: undefined,
-        mata_anggaran: '',
-        mata_anggaran_id: undefined,
-        maksud_perjalanan: '',
-        alat_angkut: '',
-        alat_angkut_id: undefined,
-        tempat_berangkat: instansi?.kabupaten_kota || '',
-        tempat_tujuan: '',
-        tempat_penerbitan: instansi?.kabupaten_kota || '',
-        tanggal_penerbitan: new Date().toISOString().split('T')[0],
-        lama_perjalanan: 1,
-        tanggal_berangkat: new Date().toISOString().split('T')[0],
-        tanggal_kembali: new Date().toISOString().split('T')[0],
-        status: 'Draft'
+  const { data: pegawaiList = [] } = useQuery<Pegawai[]>({
+    queryKey: ['pegawai-select', tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('pegawai')
+        .select('id, nip, nama_lengkap, jabatan, pangkat_id, golongan_id, ref_pangkat:pangkat_id(nama), ref_golongan:golongan_id(nama)')
+        .eq('tenant_id', tenantId!).eq('status_aktif', true).order('nama_lengkap');
+      if (error) throw error;
+      return (data ?? []) as unknown as Pegawai[];
+    },
+    enabled: !!tenantId,
+  });
+
+  const { data: sptList = [] } = useQuery<SPT[]>({
+    queryKey: ['spt-final', tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('spt')
+        .select('id, nomor_spt, tanggal_penetapan, status')
+        .eq('tenant_id', tenantId!).eq('status', 'Final').order('tanggal_penetapan', { ascending: false });
+      if (error) throw error;
+      return data as SPT[];
+    },
+    enabled: !!tenantId,
+  });
+
+  const { data: penandatanganList = [] } = useQuery<Penandatangan[]>({
+    queryKey: ['penandatangan-sppd', tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('penandatangan')
+        .select('*').eq('tenant_id', tenantId!).eq('status_aktif', true);
+      if (error) throw error;
+      return (data as Penandatangan[]).filter(p => p.jenis_dokumen?.includes('SPPD'));
+    },
+    enabled: !!tenantId,
+  });
+
+  const { data: mataAnggaranList = [] } = useQuery<MataAnggaran[]>({
+    queryKey: ['mata-anggaran', tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('mata_anggaran')
+        .select('*').eq('tenant_id', tenantId!).eq('is_active', true).order('kode');
+      if (error) throw error;
+      return data as MataAnggaran[];
+    },
+    enabled: !!tenantId,
+  });
+
+  const { data: instansiList = [] } = useQuery<Instansi[]>({
+    queryKey: ['instansi', tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('instansi').select('*').eq('tenant_id', tenantId!);
+      if (error) throw error;
+      return data as Instansi[];
+    },
+    enabled: !!tenantId,
+  });
+
+  const { data: tingkatList = [] } = useQuery<RefTingkatPerjalanan[]>({
+    queryKey: ['ref-tingkat-perjalanan'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('ref_tingkat_perjalanan').select('*').order('kode');
+      if (error) throw error;
+      return data as RefTingkatPerjalanan[];
+    },
+  });
+
+  const { data: alatAngkutList = [] } = useQuery<RefAlatAngkut[]>({
+    queryKey: ['ref-alat-angkut'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('ref_alat_angkut').select('*').order('nama');
+      if (error) throw error;
+      return data as RefAlatAngkut[];
+    },
+  });
+
+  // ── Form setup ─────────────────────────────────────────────────────────────
+  const {
+    register, control, handleSubmit, watch, setValue, formState: { errors },
+  } = useForm<FormValues>({
+    resolver: zodResolver(sppdSchema),
+    defaultValues: {
+      lama_perjalanan: 1,
+      tanggal_berangkat: format(new Date(), 'yyyy-MM-dd'),
+      tanggal_penerbitan: format(new Date(), 'yyyy-MM-dd'),
+      pengikut: [],
+    },
+  });
+
+  const { fields: pengikutFields, append: appendPengikut, remove: removePengikut, move: movePengikut } = useFieldArray({
+    control, name: 'pengikut',
+  });
+
+  // Populate form when editing
+  useEffect(() => {
+    if (!existingSPPD) return;
+    const s = existingSPPD;
+    setValue('spt_id', s.spt_id ?? null);
+    setValue('pegawai_id', s.pegawai_id);
+    setValue('pejabat_pemberi_perintah_id', s.pejabat_pemberi_perintah_id ?? null);
+    setValue('tingkat_perjalanan', s.tingkat_perjalanan ?? '');
+    setValue('maksud_perjalanan', s.maksud_perjalanan);
+    setValue('alat_angkut', s.alat_angkut ?? '');
+    setValue('tempat_berangkat', s.tempat_berangkat);
+    setValue('tempat_tujuan', s.tempat_tujuan);
+    setValue('lama_perjalanan', s.lama_perjalanan);
+    setValue('tanggal_berangkat', s.tanggal_berangkat);
+    setValue('tanggal_penerbitan', s.tanggal_penerbitan);
+    setValue('instansi_id', s.instansi_id ?? null);
+    setValue('mata_anggaran_id', s.mata_anggaran_id ?? null);
+    setValue('keterangan_lain', s.keterangan_lain ?? '');
+    setValue('penandatangan_id', s.penandatangan_id ?? null);
+    if (s.sppd_pengikut?.length) {
+      setValue('pengikut', s.sppd_pengikut.map(p => ({
+        tipe: p.tipe,
+        pegawai_id: p.pegawai_id ?? null,
+        nama: p.nama ?? '',
+        umur: p.umur ?? null,
+        keterangan: p.keterangan ?? '',
+        urutan: p.urutan,
+      })));
+    }
+  }, [existingSPPD, setValue]);
+
+  // Watched values for computed fields and preview
+  const watchedBerangkat = watch('tanggal_berangkat');
+  const watchedLama = watch('lama_perjalanan');
+  const watchedPegawai = watch('pegawai_id');
+  const watchedSptId = watch('spt_id');
+  const watchedTujuan = watch('tempat_tujuan');
+  const watchedMaksud = watch('maksud_perjalanan');
+  const watchedPenandatangan = watch('penandatangan_id');
+  const watchedPengikut = watch('pengikut');
+
+  const tanggalKembali = computeKembali(watchedBerangkat, watchedLama);
+
+  // SPT date validation
+  const selectedSpt = sptList.find(s => s.id === watchedSptId);
+  const sptDateWarning = selectedSpt && watchedBerangkat && isAfter(parseISO(selectedSpt.tanggal_penetapan), parseISO(watchedBerangkat))
+    ? `Tanggal berangkat harus >= tanggal SPT (${format(parseISO(selectedSpt.tanggal_penetapan), 'dd MMM yyyy', { locale: localeID })})`
+    : null;
+
+  // Selected pegawai details
+  const selectedPegawai = pegawaiList.find(p => p.id === watchedPegawai);
+
+  // Overlap check (debounced on submit)
+  const checkOverlap = useCallback(async (pegawaiId: number, berangkat: string, kembali: string, currentId?: number) => {
+    if (!pegawaiId || !berangkat || !kembali) return null;
+    let q = supabase.from('sppd')
+      .select('id, nomor_sppd, tanggal_berangkat, tanggal_kembali')
+      .eq('pegawai_id', pegawaiId)
+      .not('status', 'in', '("Cancelled","Completed","Expired")')
+      .lte('tanggal_berangkat', kembali)
+      .gte('tanggal_kembali', berangkat);
+    if (currentId) q = q.neq('id', currentId);
+    const { data } = await q;
+    return data?.length ? data[0] : null;
+  }, []);
+
+  // ── Save mutation ──────────────────────────────────────────────────────────
+  const saveMutation = useMutation({
+    mutationFn: async ({ values, targetStatus }: { values: FormValues; targetStatus: DocumentStatus }) => {
+      const { pengikut, ...sppdData } = values;
+      const kembali = computeKembali(sppdData.tanggal_berangkat, sppdData.lama_perjalanan);
+
+      // Overlap check
+      if (targetStatus !== 'Draft' && watchedPegawai) {
+        const overlap = await checkOverlap(watchedPegawai, sppdData.tanggal_berangkat, kembali, isEdit ? Number(id) : undefined);
+        if (overlap) {
+          throw new Error(`Pegawai memiliki SPPD yang tumpang tindih (${overlap.nomor_sppd || `#${overlap.id}`})`);
+        }
+      }
+
+      const payload = {
+        ...sppdData,
+        tanggal_kembali: kembali,
+        tenant_id: tenantId!,
+        status: targetStatus,
+        spt_id: sppdData.spt_id ?? null,
+        pejabat_pemberi_perintah_id: sppdData.pejabat_pemberi_perintah_id ?? null,
+        instansi_id: sppdData.instansi_id ?? null,
+        mata_anggaran_id: sppdData.mata_anggaran_id ?? null,
+        penandatangan_id: sppdData.penandatangan_id ?? null,
+        tingkat_perjalanan: sppdData.tingkat_perjalanan || null,
+        alat_angkut: sppdData.alat_angkut || null,
+        keterangan_lain: sppdData.keterangan_lain || null,
+      };
+
+      let sppdId: number;
+
+      if (isEdit) {
+        const { error } = await supabase.from('sppd').update(payload).eq('id', Number(id));
+        if (error) throw error;
+        sppdId = Number(id);
+        // Remove old pengikut
+        await supabase.from('sppd_pengikut').delete().eq('sppd_id', sppdId);
+      } else {
+        // Finalize: get nomor via RPC
+        let nomor_sppd: string | null = null;
+        if (targetStatus !== 'Draft') {
+          const { data: nomorData, error: rpcErr } = await supabase.rpc('generate_nomor_sppd', {
+            p_tenant_id: tenantId,
+          });
+          if (rpcErr) throw rpcErr;
+          nomor_sppd = nomorData;
+        }
+        const { data: inserted, error } = await supabase
+          .from('sppd')
+          .insert({ ...payload, nomor_sppd, print_count: 0 })
+          .select('id')
+          .single();
+        if (error) throw error;
+        sppdId = inserted.id;
+      }
+
+      // Insert pengikut
+      if (pengikut.length) {
+        const pengikutRows = pengikut.map((p, i) => ({
+          sppd_id: sppdId,
+          tipe: p.tipe,
+          pegawai_id: p.tipe === 'pegawai' ? p.pegawai_id : null,
+          nama: p.tipe === 'manual' ? p.nama : null,
+          umur: p.umur ?? null,
+          keterangan: p.keterangan ?? null,
+          urutan: i + 1,
+        }));
+        const { error: pe } = await supabase.from('sppd_pengikut').insert(pengikutRows);
+        if (pe) throw pe;
+      }
+
+      // Mark status
+      if (!isEdit && targetStatus === 'Menunggu Persetujuan') {
+        await supabase.from('sppd').update({ status: 'Menunggu Persetujuan' }).eq('id', sppdId);
+      }
+
+      return sppdId;
+    },
+    onSuccess: (_sppdId, { targetStatus }) => {
+      queryClient.invalidateQueries({ queryKey: ['sppd-list'] });
+      if (isEdit) queryClient.invalidateQueries({ queryKey: ['sppd-detail', id] });
+      toast.success(
+        targetStatus === 'Draft' ? 'Draft SPPD disimpan.' :
+        targetStatus === 'Completed' ? 'SPPD ditandai selesai.' :
+        'SPPD berhasil difinalisasi!'
+      );
+      navigate('/sppd');
+    },
+    onError: (e: Error) => {
+      setOverlapWarning(e.message);
+      toast.error(e.message);
+    },
+  });
+
+  const onSubmit = (targetStatus: DocumentStatus) => handleSubmit(values => {
+    setOverlapWarning(null);
+    saveMutation.mutate({ values, targetStatus });
+  })();
+
+  // Mark completed (edit mode only)
+  const markCompleted = async () => {
+    if (!id) return;
+    const { error } = await supabase.from('sppd').update({
+      status: 'Completed', completed_at: new Date().toISOString(),
+    }).eq('id', Number(id));
+    if (error) toast.error(error.message);
+    else {
+      toast.success('SPPD ditandai selesai.');
+      queryClient.invalidateQueries({ queryKey: ['sppd-list'] });
+      navigate('/sppd');
+    }
+  };
+
+  // ── Pengikut helpers ───────────────────────────────────────────────────────
+  const handleAddPengikut = () => {
+    if (pengikutFields.length >= 3) { toast.warning('Maksimal 3 pengikut.'); return; }
+    if (pengikutFormTipe === 'pegawai' && !pengikutPegawaiId) { toast.error('Pilih pegawai.'); return; }
+    if (pengikutFormTipe === 'manual' && !pengikutNama.trim()) { toast.error('Isi nama pengikut.'); return; }
+
+    const pegawaiData = pegawaiList.find(p => p.id === Number(pengikutPegawaiId));
+    appendPengikut({
+      tipe: pengikutFormTipe,
+      pegawai_id: pengikutFormTipe === 'pegawai' ? Number(pengikutPegawaiId) : null,
+      nama: pengikutFormTipe === 'manual' ? pengikutNama : (pegawaiData?.nama_lengkap ?? ''),
+      umur: pengikutUmur !== '' ? Number(pengikutUmur) : null,
+      keterangan: pengikutKet,
+      urutan: pengikutFields.length + 1,
     });
+    setPengikutPegawaiId('');
+    setPengikutNama('');
+    setPengikutUmur('');
+    setPengikutKet('');
+    setShowPengikutForm(false);
+  };
 
-    useEffect(() => {
-        if (fromSptId && spts.length > 0) {
-            const spt = spts.find(s => s.id === Number(fromSptId));
-            if (spt) {
-                setFormData(prev => ({
-                    ...prev,
-                    spt_id: spt.id,
-                    maksud_perjalanan: spt.tujuan_kegiatan.join('; '),
-                    lama_perjalanan: spt.lama_kegiatan,
-                    tanggal_berangkat: spt.tanggal_penetapan,
-                    // Try to pre-fill from instansi if available
-                    tempat_berangkat: prev.tempat_berangkat || instansi?.kabupaten_kota || '',
-                    tempat_penerbitan: prev.tempat_penerbitan || instansi?.kabupaten_kota || ''
-                }));
-                // Auto-populate from SPT personnel
-                if (spt?.pegawai_list && spt.pegawai_list.length > 0) {
-                    // 1st person is Main
-                    setFormData(prev => ({ ...prev, pegawai_id: spt.pegawai_list?.[0].pegawai_id }));
-                    // Others are Followers
-                    if (spt.pegawai_list.length > 1) {
-                        setSelectedPengikutIds(spt.pegawai_list.slice(1).map(p => p.pegawai_id));
-                    }
-                }
-            }
-        }
-    }, [fromSptId, spts, instansi]);
+  // ── Preview helpers ────────────────────────────────────────────────────────
+  const previewPenandatangan = penandatanganList.find(p => p.id === watchedPenandatangan);
+  const previewPegawai = pegawaiList.find(p => p.id === watchedPegawai);
+  const previewInstansi = instansiList.find(i => i.is_primary) ?? instansiList[0];
 
-    // Update defaults when settings/instansi load
-    useEffect(() => {
-        if (instansi && !id) {
-            setFormData(prev => ({
-                ...prev,
-                tempat_berangkat: prev.tempat_berangkat || instansi.kabupaten_kota,
-                tempat_penerbitan: prev.tempat_penerbitan || instansi.kabupaten_kota
-            }));
-        }
-    }, [instansi, id]);
-
-    useEffect(() => {
-        if (id && sppds.length > 0) {
-            const existing = sppds.find(s => s.id === Number(id));
-            if (existing) {
-                setFormData(existing);
-                setSelectedPengikutIds(existing.pengikut?.map(p => p.pegawai_id) || []);
-            }
-        } else if (!id) {
-            generateSPPDNumber().then(num => setFormData(prev => ({ ...prev, nomor_sppd: num })));
-        }
-    }, [id, sppds, generateSPPDNumber]);
-
-    const handleSubmit = async (e: React.FormEvent, status: 'Draft' | 'Final') => {
-        e.preventDefault();
-        if (!formData.pegawai_id) {
-            alert('Mohon tentukan personel utama perjalanan dinas.');
-            return;
-        }
-
-        setIsSubmitting(true);
-        try {
-            // Robustly strip all relation objects and non-column fields
-            const {
-                pegawai, spt, penandatangan: _, instansi: __, pengikut,
-                pejabat_pemberi_perintah, tingkat_biaya, moda_transportasi,
-                anggaran_ref,
-                ...cleanData
-            } = formData as any;
-
-            const finalData = {
-                ...cleanData,
-                status,
-                instansi_id: instansi?.id,
-                penandatangan_id: formData.penandatangan_id || penandatangan.find(p => p.jenis_dokumen.includes('SPPD'))?.id,
-                // Ensure mandatory fields are present
-                tanggal_penerbitan: formData.tanggal_penerbitan || new Date().toISOString().split('T')[0]
-            };
-
-            console.log('Saving SPPD Data:', finalData);
-
-            if (id) {
-                await updateSPPD(Number(id), finalData, selectedPengikutIds);
-            } else {
-                await createSPPD(finalData, selectedPengikutIds);
-            }
-            navigate('/sppd');
-        } catch (err: any) {
-            alert('Proses penyimpanan gagal: ' + err.message);
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
+  // ── Loading state ──────────────────────────────────────────────────────────
+  if (isEdit && loadingExisting) {
     return (
-        <div className="form-page-v2">
-            <header className="page-header-v2">
-                <button onClick={() => navigate('/sppd')} className="back-btn-v2">
-                    <ArrowLeft size={20} />
-                </button>
-                <div className="header-content-v2">
-                    <div className="breadcrumb-v2">
-                        <span>Administrasi SPPD</span>
-                        <ChevronRight size={14} />
-                        <span>{id ? 'Perbarui Perjalanan' : 'Registrasi Perjalanan Baru'}</span>
-                    </div>
-                    <h1>{id ? 'Redaksi Surat Jalan' : 'Penyusunan SPPD Baru'}</h1>
-                </div>
-                <div className="header-actions-v2">
-                    <button
-                        type="button"
-                        className="btn btn-outline"
-                        onClick={(e) => handleSubmit(e, 'Draft')}
-                        disabled={isSubmitting}
-                    >
-                        {isSubmitting ? <Loader2 className="spin" size={18} /> : <><Save size={18} /> Simpan Draft</>}
-                    </button>
-                    <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={(e) => handleSubmit(e, 'Final')}
-                        disabled={isSubmitting}
-                    >
-                        {isSubmitting ? <Loader2 className="spin" size={18} /> : <><FileCheck size={18} /> Finalkan Surat</>}
-                    </button>
-                </div>
-            </header>
-
-            <div className="form-grid-v2">
-                <form className="main-form-v2">
-                    <section className="form-section-v2 card">
-                        <div className="section-header-v2">
-                            <div className="section-icon-v2"><LinkIcon size={18} /></div>
-                            <h3>Referesi & Personel Utama</h3>
-                        </div>
-
-                        <div className="form-row-v2">
-                            <div className="form-group">
-                                <label className="form-label-v2">No. Registrasi SPPD *</label>
-                                <input
-                                    type="text"
-                                    className="form-input-v2"
-                                    value={formData.nomor_sppd || ''}
-                                    onChange={(e) => setFormData({ ...formData, nomor_sppd: e.target.value })}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label-v2">Relasi Dokumen SPT</label>
-                                <select
-                                    className="form-input-v2"
-                                    value={formData.spt_id || ''}
-                                    onChange={(e) => {
-                                        const sptId = Number(e.target.value);
-                                        const spt = spts.find(s => s.id === sptId);
-                                        setFormData({
-                                            ...formData,
-                                            spt_id: sptId,
-                                            maksud_perjalanan: spt?.tujuan_kegiatan.join('; ') || formData.maksud_perjalanan
-                                        });
-                                    }}
-                                >
-                                    <option value="">-- Pilih Referensi SPT --</option>
-                                    {spts.map(s => <option key={s.id} value={s.id}>{s.nomor_spt}</option>)}
-                                </select>
-                            </div>
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label-v2">Personel Pelaksana (Utama) *</label>
-                            <select
-                                className="form-input-v2"
-                                required
-                                value={formData.pegawai_id || ''}
-                                onChange={(e) => setFormData({ ...formData, pegawai_id: Number(e.target.value) })}
-                            >
-                                <option value="">Pilih Personel Utama</option>
-                                {allPegawai.map(p => (
-                                    <option key={p.id} value={p.id}>{p.nama_lengkap} (NIP. {p.nip})</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label-v2">Pejabat Pemberi Mandat / Perintah *</label>
-                            <select
-                                className="form-input-v2"
-                                required
-                                value={formData.pejabat_pemberi_perintah_id || ''}
-                                onChange={(e) => setFormData({ ...formData, pejabat_pemberi_perintah_id: Number(e.target.value) })}
-                            >
-                                <option value="">Pilih Pejabat Pemberi Perintah</option>
-                                {allPegawai.map(p => (
-                                    <option key={p.id} value={p.id}>{p.nama_lengkap} (NIP. {p.nip})</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label-v2">Pembebanan Mata Anggaran *</label>
-                            <select
-                                className="form-input-v2"
-                                required
-                                value={formData.mata_anggaran_id || ''}
-                                onChange={(e) => {
-                                    const id = Number(e.target.value);
-                                    const selected = listAnggaran.find(a => a.id === id);
-                                    setFormData({
-                                        ...formData,
-                                        mata_anggaran_id: id,
-                                        mata_anggaran: selected ? `${selected.kode} - ${selected.nama}` : ''
-                                    });
-                                }}
-                            >
-                                <option value="">-- Pilih Mata Anggaran --</option>
-                                {listAnggaran.map(a => (
-                                    <option key={a.id} value={a.id}>{a.kode} - {a.nama}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label-v2">Personel Pengikut (Tambahan)</label>
-                            <MultiSelectPegawai
-                                availablePegawai={allPegawai.filter(p => p.id !== formData.pegawai_id)}
-                                selectedIds={selectedPengikutIds}
-                                onChange={setSelectedPengikutIds}
-                            />
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label-v2">Tingkat Biaya Perjalanan Dinas *</label>
-                            <select
-                                className="form-input-v2"
-                                required
-                                value={formData.tingkat_biaya_id || ''}
-                                onChange={(e) => {
-                                    const id = Number(e.target.value);
-                                    const selected = tingkatPerjalanan.find(t => t.id === id);
-                                    setFormData({
-                                        ...formData,
-                                        tingkat_biaya_id: id,
-                                        tingkat_perjalanan: selected?.kode || ''
-                                    });
-                                }}
-                            >
-                                <option value="">Pilih Tingkat Biaya</option>
-                                {tingkatPerjalanan.map(t => (
-                                    <option key={t.id} value={t.id}>{t.kode} - {t.deskripsi}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </section>
-
-                    <section className="form-section-v2 card">
-                        <div className="section-header-v2">
-                            <div className="section-icon-v2"><Briefcase size={18} /></div>
-                            <h3>Maksud & Detail Logistik Perjalanan</h3>
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label-v2">Maksud / Tujuan Perjalanan Dinas *</label>
-                            <textarea
-                                className="form-input-v2"
-                                rows={6}
-                                required
-                                placeholder="Rincian tujuan spesifik dari perjalanan dinas (Contoh: Menghadiri Rapat Koordinasi Teknis...)"
-                                value={formData.maksud_perjalanan || ''}
-                                onChange={(e) => setFormData({ ...formData, maksud_perjalanan: e.target.value })}
-                                style={{ resize: 'vertical', minHeight: '150px' }}
-                            />
-                        </div>
-
-                        <div className="form-row-v2" style={{ marginTop: '20px' }}>
-                            <div className="form-group">
-                                <label className="form-label-v2"><Plane size={14} style={{ marginRight: '6px' }} /> Moda Transportasi</label>
-                                <select
-                                    className="form-input-v2"
-                                    required
-                                    value={formData.alat_angkut_id || ''}
-                                    onChange={(e) => {
-                                        const id = Number(e.target.value);
-                                        const selected = listAlatAngkut.find(a => a.id === id);
-                                        setFormData({
-                                            ...formData,
-                                            alat_angkut_id: id,
-                                            alat_angkut: selected?.nama || ''
-                                        });
-                                    }}
-                                >
-                                    <option value="">Pilih Alat Angkut</option>
-                                    {listAlatAngkut.map(a => (
-                                        <option key={a.id} value={a.id}>{a.nama}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label-v2">Durasi Tugas (Hari)</label>
-                                <input
-                                    type="number"
-                                    className="form-input-v2"
-                                    value={formData.lama_perjalanan || 1}
-                                    onChange={(e) => setFormData({ ...formData, lama_perjalanan: Number(e.target.value) })}
-                                />
-                            </div>
-                        </div>
-
-                        <div className="form-row-v2" style={{ marginTop: '20px' }}>
-                            <div className="form-group">
-                                <label className="form-label-v2"><MapPin size={14} style={{ marginRight: '6px' }} /> Lokasi Keberangkatan</label>
-                                <input
-                                    type="text"
-                                    className="form-input-v2"
-                                    value={formData.tempat_berangkat || ''}
-                                    onChange={(e) => setFormData({ ...formData, tempat_berangkat: e.target.value })}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label-v2"><MapPin size={14} style={{ marginRight: '6px' }} /> Lokasi Tujuan</label>
-                                <input
-                                    type="text"
-                                    className="form-input-v2"
-                                    placeholder="Contoh: Medan / Jakarta (Kantor Kementerian)"
-                                    value={formData.tempat_tujuan || ''}
-                                    onChange={(e) => setFormData({ ...formData, tempat_tujuan: e.target.value })}
-                                />
-                            </div>
-                        </div>
-
-                        <div className="form-row-v2" style={{ marginTop: '20px' }}>
-                            <div className="form-group">
-                                <label className="form-label-v2"><Calendar size={14} style={{ marginRight: '6px' }} /> Tanggal Keberangkatan</label>
-                                <input
-                                    type="date"
-                                    className="form-input-v2"
-                                    value={formData.tanggal_berangkat || ''}
-                                    onChange={(e) => setFormData({ ...formData, tanggal_berangkat: e.target.value })}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label-v2"><Calendar size={14} style={{ marginRight: '6px' }} /> Tanggal Kepulangan</label>
-                                <input
-                                    type="date"
-                                    className="form-input-v2"
-                                    value={formData.tanggal_kembali || ''}
-                                    onChange={(e) => setFormData({ ...formData, tanggal_kembali: e.target.value })}
-                                />
-                            </div>
-                        </div>
-                    </section>
-
-                    <section className="form-section-v2 card">
-                        <div className="section-header-v2">
-                            <div className="section-icon-v2"><FileCheck size={18} /></div>
-                            <h3>Pengesahan Dokumen</h3>
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label-v2">Pejabat Pengesah (Tanda Tangan) *</label>
-                            <select
-                                className="form-input-v2"
-                                required
-                                value={formData.penandatangan_id || ''}
-                                onChange={(e) => setFormData({ ...formData, penandatangan_id: Number(e.target.value) })}
-                            >
-                                <option value="">Pilih Otoritas Penandatangan</option>
-                                {penandatangan.filter(p => p.jenis_dokumen.includes('SPPD')).map(p => (
-                                    <option key={p.id} value={p.id}>{p.nama_lengkap} - {p.jabatan}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="form-row-v2" style={{ marginTop: '20px' }}>
-                            <div className="form-group">
-                                <label className="form-label-v2">Tempat Penerbitan SPPD *</label>
-                                <input
-                                    type="text"
-                                    className="form-input-v2"
-                                    required
-                                    placeholder="Contoh: Muaro Sijunjung"
-                                    value={formData.tempat_penerbitan || ''}
-                                    onChange={(e) => setFormData({ ...formData, tempat_penerbitan: e.target.value })}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label className="form-label-v2">Tanggal Penerbitan SPPD *</label>
-                                <input
-                                    type="date"
-                                    className="form-input-v2"
-                                    required
-                                    value={formData.tanggal_penerbitan || ''}
-                                    onChange={(e) => setFormData({ ...formData, tanggal_penerbitan: e.target.value })}
-                                />
-                            </div>
-                        </div>
-                    </section>
-                </form>
-
-                <aside className="side-panel-v2">
-                    <div className="side-card-v2 glass-effect">
-                        <div className="side-card-header-v2">
-                            <div className="header-with-icon-v2">
-                                <Users size={18} />
-                                <h3>Personel Terikut</h3>
-                            </div>
-                            <span className="count-badge-v2">{selectedPengikutIds.length} Orang</span>
-                        </div>
-                        <div className="side-card-body-v2">
-                            <MultiSelectPegawai
-                                availablePegawai={allPegawai.filter(p => p.id !== formData.pegawai_id && p.status_aktif)}
-                                selectedIds={selectedPengikutIds}
-                                onChange={setSelectedPengikutIds}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="help-box-v2" style={{ marginTop: '24px', padding: '20px', background: '#f0f9ff', borderRadius: '20px', border: '1px solid #bae6fd' }}>
-                        <div style={{ display: 'flex', gap: '12px', color: '#0369a1' }}>
-                            <Info size={20} style={{ flexShrink: 0 }} />
-                            <div style={{ fontSize: '13px' }}>
-                                <p style={{ margin: '0 0 8px', fontWeight: 800 }}>Tips Penyusunan</p>
-                                <p style={{ margin: 0, lineHeight: 1.5, opacity: 0.8 }}>Pastikan tanggal keberangkatan dan kepulangan sesuai dengan durasi (hari) yang telah ditentukan untuk akurasi pelaporan anggaran.</p>
-                            </div>
-                        </div>
-                    </div>
-                </aside>
-            </div>
-
-            <style>{`
-        .form-page-v2 { max-width: 1400px; margin: 0 auto; padding-bottom: 60px; }
-        .page-header-v2 { display: flex; align-items: center; gap: 24px; margin-bottom: 32px; background: white; padding: 24px 32px; border-radius: 20px; border: 1px solid var(--p-border); box-shadow: var(--shadow-p); }
-        .back-btn-v2 { width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--p-border); background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: var(--transition-p); color: var(--p-text-muted); }
-        .back-btn-v2:hover { background: #f8fafc; color: var(--p-primary); border-color: var(--p-primary); }
-        .header-content-v2 { flex: 1; }
-        .breadcrumb-v2 { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; color: var(--p-accent); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-        .header-content-v2 h1 { font-size: 28px; color: var(--p-primary); margin: 0; letter-spacing: -0.5px; }
-        .header-actions-v2 { display: flex; gap: 12px; }
-
-        .form-grid-v2 { display: grid; grid-template-columns: 1fr 380px; gap: 32px; align-items: start; }
-        .main-form-v2 { display: flex; flex-direction: column; gap: 24px; }
-        .form-section-v2 { padding: 32px; }
-        .section-header-v2 { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; border-bottom: 1px solid #f1f5f9; padding-bottom: 16px; }
-        .section-icon-v2 { width: 36px; height: 36px; background: #eff6ff; color: var(--p-accent); border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-        .section-header-v2 h3 { font-size: 18px; color: var(--p-primary); margin: 0; }
-
-        .form-label-v2 { display: block; font-size: 14px; font-weight: 700; color: var(--p-text-main); margin-bottom: 10px; }
-        .form-input-v2 { width: 100%; padding: 12px 16px; border-radius: 12px; border: 1px solid var(--p-border); background: #f8fafc; font-size: 15px; color: var(--p-text-main); font-family: var(--font-main); transition: var(--transition-p); outline: none; }
-        .form-input-v2:focus { border-color: var(--p-accent); background: white; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1); }
-        .form-row-v2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-
-        .side-panel-v2 { position: sticky; top: 24px; }
-        .side-card-v2 { background: white; border: 1px solid var(--p-border); border-radius: 20px; box-shadow: var(--shadow-p); overflow: hidden; }
-        .side-card-header-v2 { padding: 20px 24px; border-bottom: 1px solid var(--p-border); display: flex; justify-content: space-between; align-items: center; }
-        .header-with-icon-v2 { display: flex; align-items: center; gap: 10px; }
-        .side-card-header-v2 h3 { font-size: 16px; color: var(--p-primary); margin: 0; }
-        .count-badge-v2 { font-size: 11px; font-weight: 800; background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 99px; }
-        .side-card-body-v2 { padding: 20px; }
-        
-        .spin { animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      `}</style>
-        </div>
+      <div className="flex items-center justify-center h-64">
+        <Loader2 size={32} className="animate-spin text-blue-500" />
+      </div>
     );
+  }
+
+  const canComplete = isEdit && (existingSPPD?.status === 'Final' || existingSPPD?.status === 'Printed');
+
+  const SECTIONS = [
+    { id: 1, label: 'Identitas Perjalanan' },
+    { id: 2, label: 'Jadwal' },
+    { id: 3, label: 'Anggaran & TTD' },
+    { id: 4, label: 'Pengikut' },
+  ] as const;
+
+  return (
+    <div className="flex flex-col gap-6 max-w-screen-xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center gap-4 bg-white rounded-2xl border border-slate-100 px-6 py-4 shadow-sm">
+        <button className="btn btn-ghost btn-icon" onClick={() => navigate('/sppd')}>
+          <ArrowLeft size={18} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wide mb-0.5">
+            <span>SPPD</span>
+            <ChevronRight size={12} />
+            <span>{isEdit ? 'Edit' : 'Buat Baru'}</span>
+          </div>
+          <h1 className="text-xl font-bold text-slate-900 truncate">
+            {isEdit
+              ? `Edit SPPD${existingSPPD?.nomor_sppd ? ` — ${existingSPPD.nomor_sppd}` : ''}`
+              : 'Buat SPPD Baru'}
+          </h1>
+        </div>
+        <div className="flex items-center gap-2">
+          {canComplete && (
+            <button className="btn btn-success btn-sm" onClick={markCompleted}>
+              <CheckCircle2 size={15} /> Tandai Selesai
+            </button>
+          )}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => onSubmit('Draft')}
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Simpan Draft
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => onSubmit('Menunggu Persetujuan')}
+            disabled={saveMutation.isPending}
+          >
+            {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileCheck size={14} />}
+            Finalisasi
+          </button>
+        </div>
+      </div>
+
+      {/* Warnings */}
+      {overlapWarning && (
+        <div className="alert alert-danger">
+          <AlertTriangle size={16} className="flex-shrink-0" />
+          <span>{overlapWarning}</span>
+        </div>
+      )}
+      {sptDateWarning && (
+        <div className="alert alert-warning">
+          <AlertTriangle size={16} className="flex-shrink-0" />
+          <span>{sptDateWarning}</span>
+        </div>
+      )}
+
+      {/* Two-panel layout */}
+      <div className="grid gap-6" style={{ gridTemplateColumns: '1fr minmax(0, 420px)' }}>
+        {/* LEFT — Form */}
+        <div className="flex flex-col gap-5">
+          {/* Section Nav */}
+          <div className="tab-list">
+            {SECTIONS.map(s => (
+              <button
+                key={s.id}
+                type="button"
+                className={`tab-item ${activeSection === s.id ? 'active' : ''}`}
+                onClick={() => setActiveSection(s.id)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Section 1 — Identitas */}
+          {activeSection === 1 && (
+            <div className="card card-body flex flex-col gap-4">
+              <h3 className="text-base font-bold text-slate-800">Identitas Perjalanan</h3>
+
+              <div className="form-group">
+                <label className="form-label">Referensi SPT (Opsional)</label>
+                <Controller name="spt_id" control={control} render={({ field }) => (
+                  <select
+                    className="form-select"
+                    value={field.value ?? ''}
+                    onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">-- Tidak ada SPT --</option>
+                    {sptList.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.nomor_spt} — {format(parseISO(s.tanggal_penetapan), 'dd MMM yyyy', { locale: localeID })}
+                      </option>
+                    ))}
+                  </select>
+                )} />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Pegawai Pelaksana <span className="required-mark">*</span></label>
+                <Controller name="pegawai_id" control={control} render={({ field }) => (
+                  <select
+                    className={`form-select ${errors.pegawai_id ? 'is-error' : ''}`}
+                    value={field.value ?? ''}
+                    onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
+                  >
+                    <option value="">Pilih Pegawai</option>
+                    {pegawaiList.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.nama_lengkap} — NIP. {p.nip}
+                      </option>
+                    ))}
+                  </select>
+                )} />
+                {selectedPegawai && (
+                  <p className="form-hint">
+                    {selectedPegawai.jabatan}
+                    {selectedPegawai.ref_pangkat ? ` · ${selectedPegawai.ref_pangkat.nama}` : ''}
+                    {selectedPegawai.ref_golongan ? ` (${selectedPegawai.ref_golongan.nama})` : ''}
+                  </p>
+                )}
+                {errors.pegawai_id && <p className="form-error"><AlertTriangle size={12} />{errors.pegawai_id.message}</p>}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Pejabat Pemberi Perintah</label>
+                <Controller name="pejabat_pemberi_perintah_id" control={control} render={({ field }) => (
+                  <select
+                    className="form-select"
+                    value={field.value ?? ''}
+                    onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">Pilih Pejabat</option>
+                    {pegawaiList.map(p => (
+                      <option key={p.id} value={p.id}>{p.nama_lengkap}</option>
+                    ))}
+                  </select>
+                )} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Tingkat Perjalanan</label>
+                  <select className="form-select" {...register('tingkat_perjalanan')}>
+                    <option value="">Pilih</option>
+                    {tingkatList.map(t => (
+                      <option key={t.id} value={t.kode}>{t.kode} — {t.deskripsi}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Alat Angkut</label>
+                  <select className="form-select" {...register('alat_angkut')}>
+                    <option value="">Pilih</option>
+                    {alatAngkutList.map(a => (
+                      <option key={a.id} value={a.nama}>{a.nama}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Maksud Perjalanan <span className="required-mark">*</span></label>
+                <textarea
+                  className={`form-textarea ${errors.maksud_perjalanan ? 'is-error' : ''}`}
+                  rows={4}
+                  placeholder="Jelaskan tujuan dan keperluan perjalanan dinas..."
+                  {...register('maksud_perjalanan')}
+                />
+                {errors.maksud_perjalanan && <p className="form-error"><AlertTriangle size={12} />{errors.maksud_perjalanan.message}</p>}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Instansi</label>
+                <Controller name="instansi_id" control={control} render={({ field }) => (
+                  <select
+                    className="form-select"
+                    value={field.value ?? ''}
+                    onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">Pilih Instansi</option>
+                    {instansiList.map(i => (
+                      <option key={i.id} value={i.id}>{i.nama_singkat}</option>
+                    ))}
+                  </select>
+                )} />
+              </div>
+            </div>
+          )}
+
+          {/* Section 2 — Jadwal */}
+          {activeSection === 2 && (
+            <div className="card card-body flex flex-col gap-4">
+              <h3 className="text-base font-bold text-slate-800">Jadwal Perjalanan</h3>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Tempat Berangkat <span className="required-mark">*</span></label>
+                  <input type="text" className={`form-input ${errors.tempat_berangkat ? 'is-error' : ''}`}
+                    placeholder="Kota asal" {...register('tempat_berangkat')} />
+                  {errors.tempat_berangkat && <p className="form-error"><AlertTriangle size={12} />{errors.tempat_berangkat.message}</p>}
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Tempat Tujuan <span className="required-mark">*</span></label>
+                  <input type="text" className={`form-input ${errors.tempat_tujuan ? 'is-error' : ''}`}
+                    placeholder="Kota tujuan" {...register('tempat_tujuan')} />
+                  {errors.tempat_tujuan && <p className="form-error"><AlertTriangle size={12} />{errors.tempat_tujuan.message}</p>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Tanggal Berangkat <span className="required-mark">*</span></label>
+                  <input type="date" className={`form-input ${errors.tanggal_berangkat ? 'is-error' : ''}`}
+                    {...register('tanggal_berangkat')} />
+                  {errors.tanggal_berangkat && <p className="form-error"><AlertTriangle size={12} />{errors.tanggal_berangkat.message}</p>}
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Lama Perjalanan (hari) <span className="required-mark">*</span></label>
+                  <input
+                    type="number" min={1} max={365}
+                    className={`form-input ${errors.lama_perjalanan ? 'is-error' : ''}`}
+                    {...register('lama_perjalanan', { valueAsNumber: true })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Tanggal Kembali <span className="text-slate-400 font-normal text-xs">(Otomatis)</span></label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={tanggalKembali}
+                    disabled
+                    readOnly
+                  />
+                  <p className="form-hint">Dihitung otomatis: berangkat + ({watchedLama} - 1) hari</p>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Tanggal Penerbitan <span className="required-mark">*</span></label>
+                  <input type="date" className={`form-input ${errors.tanggal_penerbitan ? 'is-error' : ''}`}
+                    {...register('tanggal_penerbitan')} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Section 3 — Anggaran & Penandatangan */}
+          {activeSection === 3 && (
+            <div className="card card-body flex flex-col gap-4">
+              <h3 className="text-base font-bold text-slate-800">Anggaran & Penandatangan</h3>
+
+              <div className="form-group">
+                <label className="form-label">Mata Anggaran</label>
+                <Controller name="mata_anggaran_id" control={control} render={({ field }) => (
+                  <select
+                    className="form-select"
+                    value={field.value ?? ''}
+                    onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">-- Pilih Mata Anggaran --</option>
+                    {mataAnggaranList.map(m => (
+                      <option key={m.id} value={m.id}>{m.kode} — {m.nama}</option>
+                    ))}
+                  </select>
+                )} />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Penandatangan</label>
+                <Controller name="penandatangan_id" control={control} render={({ field }) => (
+                  <select
+                    className="form-select"
+                    value={field.value ?? ''}
+                    onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">-- Pilih Penandatangan --</option>
+                    {penandatanganList.map(p => (
+                      <option key={p.id} value={p.id}>{p.nama_lengkap} — {p.jabatan}</option>
+                    ))}
+                  </select>
+                )} />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Keterangan Lain</label>
+                <textarea className="form-textarea" rows={3} {...register('keterangan_lain')} />
+              </div>
+            </div>
+          )}
+
+          {/* Section 4 — Pengikut */}
+          {activeSection === 4 && (
+            <div className="card card-body flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-slate-800">Pengikut Perjalanan</h3>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowPengikutForm(v => !v)}
+                  disabled={pengikutFields.length >= 3}
+                >
+                  <Plus size={14} /> Tambah Pengikut
+                </button>
+              </div>
+
+              {pengikutFields.length >= 3 && (
+                <div className="alert alert-warning">
+                  <AlertTriangle size={14} />
+                  <span>Maksimal 3 pengikut telah ditambahkan.</span>
+                </div>
+              )}
+
+              {/* Pengikut mini form */}
+              {showPengikutForm && (
+                <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 flex flex-col gap-3">
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer text-sm font-medium">
+                      <input type="radio" name="pqTipe" value="pegawai"
+                        checked={pengikutFormTipe === 'pegawai'}
+                        onChange={() => setPengikutFormTipe('pegawai')} />
+                      Pegawai
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer text-sm font-medium">
+                      <input type="radio" name="pqTipe" value="manual"
+                        checked={pengikutFormTipe === 'manual'}
+                        onChange={() => setPengikutFormTipe('manual')} />
+                      Manual
+                    </label>
+                  </div>
+
+                  {pengikutFormTipe === 'pegawai' ? (
+                    <div className="form-group">
+                      <label className="form-label">Pilih Pegawai</label>
+                      <select
+                        className="form-select"
+                        value={pengikutPegawaiId}
+                        onChange={e => setPengikutPegawaiId(e.target.value ? Number(e.target.value) : '')}
+                      >
+                        <option value="">Pilih...</option>
+                        {pegawaiList
+                          .filter(p => p.id !== watchedPegawai && !watchedPengikut.some(px => px.tipe === 'pegawai' && px.pegawai_id === p.id))
+                          .map(p => (
+                            <option key={p.id} value={p.id}>{p.nama_lengkap} — NIP. {p.nip}</option>
+                          ))
+                        }
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="form-group">
+                        <label className="form-label">Nama</label>
+                        <input type="text" className="form-input" value={pengikutNama}
+                          onChange={e => setPengikutNama(e.target.value)} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Umur</label>
+                        <input type="number" min={1} max={120} className="form-input"
+                          value={pengikutUmur}
+                          onChange={e => setPengikutUmur(e.target.value ? Number(e.target.value) : '')} />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label className="form-label">Keterangan (Opsional)</label>
+                    <input type="text" className="form-input" value={pengikutKet}
+                      onChange={e => setPengikutKet(e.target.value)} />
+                  </div>
+
+                  <div className="flex gap-2 justify-end">
+                    <button type="button" className="btn btn-ghost btn-sm"
+                      onClick={() => setShowPengikutForm(false)}>Batal</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={handleAddPengikut}>
+                      <Plus size={13} /> Tambahkan
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Pengikut list */}
+              {pengikutFields.length === 0 ? (
+                <div className="empty-state py-8">
+                  <User size={32} className="text-slate-300 mb-2" />
+                  <p className="text-sm text-slate-400">Belum ada pengikut ditambahkan.</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {pengikutFields.map((field, idx) => {
+                    const p = pegawaiList.find(px => px.id === field.pegawai_id);
+                    const displayName = field.tipe === 'pegawai' ? (p?.nama_lengkap ?? '-') : (field.nama ?? '-');
+                    return (
+                      <div key={field.id} className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3">
+                        <GripVertical size={16} className="drag-handle text-slate-400" />
+                        <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                          {initials(displayName)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-slate-800 text-sm leading-tight truncate">{displayName}</p>
+                          <p className="text-xs text-slate-400">
+                            {field.tipe === 'pegawai' ? `NIP. ${p?.nip ?? '-'}` : `Umur: ${field.umur ?? '-'}`}
+                            {field.keterangan ? ` · ${field.keterangan}` : ''}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          {idx > 0 && (
+                            <button type="button" className="btn btn-ghost btn-icon-sm text-slate-400"
+                              onClick={() => movePengikut(idx, idx - 1)}>↑</button>
+                          )}
+                          {idx < pengikutFields.length - 1 && (
+                            <button type="button" className="btn btn-ghost btn-icon-sm text-slate-400"
+                              onClick={() => movePengikut(idx, idx + 1)}>↓</button>
+                          )}
+                          <button type="button" className="btn btn-ghost btn-icon-sm text-rose-400"
+                            onClick={() => removePengikut(idx)}>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT — Preview */}
+        <div className="sticky top-6 h-fit">
+          <div className="preview-panel overflow-y-auto max-h-[calc(100vh-120px)]">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 text-center">
+              Preview Dokumen
+            </p>
+            {/* Header instansi */}
+            <div className="text-center mb-4 border-b-2 border-black pb-3">
+              <p className="font-bold text-sm uppercase">{previewInstansi?.nama_lengkap ?? '[INSTANSI]'}</p>
+              <p className="text-xs">{previewInstansi?.alamat ?? ''}</p>
+              <p className="text-xs">Telp. {previewInstansi?.telepon ?? '-'}</p>
+            </div>
+            <p className="font-bold text-center text-sm uppercase underline mb-4">
+              SURAT PERINTAH PERJALANAN DINAS
+            </p>
+            <p className="text-xs text-center mb-4">
+              Nomor: {existingSPPD?.nomor_sppd ?? '................................'}
+            </p>
+
+            <table className="w-full text-xs mb-4" style={{ borderCollapse: 'collapse' }}>
+              <tbody>
+                {[
+                  ['Pejabat Yang Memberi Perintah', pegawaiList.find(p => p.id === watch('pejabat_pemberi_perintah_id'))?.nama_lengkap ?? '—'],
+                  ['Nama / NIP', previewPegawai ? `${previewPegawai.nama_lengkap} / ${previewPegawai.nip}` : '—'],
+                  ['Jabatan', previewPegawai?.jabatan ?? '—'],
+                  ['Tingkat Biaya Perjalanan', watch('tingkat_perjalanan') || '—'],
+                  ['Maksud Perjalanan', watchedMaksud || '—'],
+                  ['Alat Angkut', watch('alat_angkut') || '—'],
+                  ['Tempat Berangkat', watch('tempat_berangkat') || '—'],
+                  ['Tempat Tujuan', watchedTujuan || '—'],
+                  ['Lama Perjalanan', watchedLama ? `${watchedLama} hari` : '—'],
+                  ['Tgl Berangkat', watchedBerangkat ? format(parseISO(watchedBerangkat), 'dd MMMM yyyy', { locale: localeID }) : '—'],
+                  ['Tgl Kembali', tanggalKembali ? format(parseISO(tanggalKembali), 'dd MMMM yyyy', { locale: localeID }) : '—'],
+                ].map(([k, v]) => (
+                  <tr key={k}>
+                    <td className="py-0.5 pr-2 text-slate-600 w-40">{k}</td>
+                    <td className="py-0.5 pr-1 w-4">:</td>
+                    <td className="py-0.5 font-medium">{v}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {watchedPengikut.length > 0 && (
+              <div className="mb-4">
+                <p className="text-xs font-bold mb-1">Pengikut:</p>
+                <ol className="text-xs list-decimal list-inside space-y-0.5">
+                  {watchedPengikut.map((p, i) => {
+                    const pg = pegawaiList.find(px => px.id === p.pegawai_id);
+                    return <li key={i}>{p.tipe === 'pegawai' ? pg?.nama_lengkap : p.nama}</li>;
+                  })}
+                </ol>
+              </div>
+            )}
+
+            <div className="mt-6 text-right text-xs">
+              <p>
+                {watch('tempat_tujuan') || '.......................'},{' '}
+                {watch('tanggal_penerbitan')
+                  ? format(parseISO(watch('tanggal_penerbitan')), 'dd MMMM yyyy', { locale: localeID })
+                  : '................................'}
+              </p>
+              <p className="mt-1">{previewPenandatangan?.jabatan ?? '................................'}</p>
+              <div className="h-12" />
+              <p className="font-bold underline">{previewPenandatangan?.nama_lengkap ?? '................................'}</p>
+              <p>NIP. {previewPenandatangan?.nip ?? '................................'}</p>
+            </div>
+          </div>
+
+          {/* Tips */}
+          <div className="alert alert-info mt-3 text-xs">
+            <Info size={14} className="flex-shrink-0" />
+            <span>Preview diperbarui saat Anda mengetik. Klik Finalisasi untuk menetapkan nomor SPPD.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default SPPDForm;

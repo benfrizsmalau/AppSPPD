@@ -1,248 +1,336 @@
-import React, { useState } from 'react';
-import { supabase } from '../lib/supabase';
-import { useNavigate } from 'react-router-dom';
-import { LogIn, Loader2, AlertCircle, Sparkles, ShieldCheck } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { motion } from 'framer-motion';
+import {
+  Eye,
+  EyeOff,
+  Loader2,
+  AlertCircle,
+  ShieldCheck,
+  FileText,
+  Users,
+  BarChart3,
+  CheckCircle2,
+} from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+
+const loginSchema = z.object({
+  email: z.string().email('Format email tidak valid'),
+  password: z.string().min(8, 'Password minimal 8 karakter'),
+});
+
+type LoginFormValues = z.infer<typeof loginSchema>;
+
+const features = [
+  { icon: FileText, label: 'Penerbitan SPT & SPPD digital terintegrasi' },
+  { icon: Users, label: 'Manajemen pegawai & jabatan terpusat' },
+  { icon: BarChart3, label: 'Laporan & rekap perjalanan dinas otomatis' },
+  { icon: CheckCircle2, label: 'Alur persetujuan & verifikasi berjenjang' },
+];
 
 const Login: React.FC = () => {
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const navigate = useNavigate();
+  const { signIn, user, profile, loading } = useAuth();
+  const navigate = useNavigate();
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-    const handleLogin = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setLoading(true);
-        setError(null);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+  });
 
-        try {
-            const { data, error } = await supabase.auth.signInWithPassword({
-                email,
-                password,
-            });
+  // Redirect if already logged in
+  if (!loading && user) {
+    return <Navigate to="/" replace />;
+  }
 
-            if (error) throw error;
-            if (data.session) {
-                navigate('/');
-            }
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setLoading(false);
-        }
-    };
+  const onSubmit = async (data: LoginFormValues) => {
+    setSubmitError(null);
+    const result = await signIn(data.email, data.password);
+    if (result.error) {
+      setSubmitError('Email atau password tidak sesuai');
+      return;
+    }
+    // After sign-in, profile will be loaded by useAuth; check setup_completed
+    // We navigate and let ProtectedRoute / App handle redirect
+    // The profile may not be available immediately; navigate to / and let the app decide
+    navigate('/');
+  };
 
-    const handleBootstrapProfile = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-            alert('Silakan login terlebih dahulu untuk membuat profil Admin.');
-            return;
-        }
+  // If user just logged in and profile is available, redirect based on setup_completed
+  useEffect(() => {
+    if (user && profile) {
+      if (profile.tenant && !(profile.tenant as any).setup_completed) {
+        navigate('/onboarding', { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
+    }
+  }, [user, profile, navigate]);
 
-        const { error } = await supabase.from('user_profiles').insert({
-            id: user.id,
-            username: user.email?.split('@')[0],
-            nama_lengkap: 'Administrator',
-            role: 'Admin',
-            status_aktif: true
-        });
-
-        if (error) {
-            if (error.code === '23505') alert('Profil sudah ada.');
-            else alert('Gagal: ' + error.message);
-        } else {
-            alert('Profil Admin berhasil dibuat! Silakan refresh.');
-            window.location.reload();
-        }
-    };
-
-    return (
-        <div className="login-v2">
-            <div className="login-v2-bg">
-                <div className="glow-1"></div>
-                <div className="glow-2"></div>
-            </div>
-
-            <div className="login-v2-container glass-effect">
-                <div className="login-v2-header">
-                    <div className="login-v2-logo">
-                        <Sparkles size={24} color="white" />
-                    </div>
-                    <h1>Selamat Datang</h1>
-                    <p>Sistem Informasi SPT & SPPD Terintegrasi</p>
-                </div>
-
-                {error && (
-                    <div className="login-v2-error">
-                        <AlertCircle size={16} />
-                        <span>{error}</span>
-                    </div>
-                )}
-
-                <form onSubmit={handleLogin} className="login-v2-form">
-                    <div className="form-group">
-                        <label className="form-label">Alamat Email</label>
-                        <input
-                            type="email"
-                            className="form-input"
-                            placeholder="nama@institusi.go.id"
-                            required
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            disabled={loading}
-                        />
-                    </div>
-                    <div className="form-group">
-                        <label className="form-label">Kata Sandi</label>
-                        <input
-                            type="password"
-                            className="form-input"
-                            placeholder="••••••••"
-                            required
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            disabled={loading}
-                        />
-                    </div>
-                    <button className="btn btn-primary login-v2-btn" disabled={loading}>
-                        {loading ? <Loader2 className="spin" size={20} /> : <><LogIn size={20} /> Masuk ke Sistem</>}
-                    </button>
-                </form>
-
-                <div className="login-v2-footer">
-                    <div className="secure-badge">
-                        <ShieldCheck size={14} />
-                        Secure Authentication
-                    </div>
-                    <button onClick={handleBootstrapProfile} className="bootstrap-btn">
-                        Inisialisasi Profil Admin
-                    </button>
-                </div>
-            </div>
-
-            <style>{`
-        .login-v2 {
-          height: 100vh;
-          width: 100vw;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: #0f172a;
-          position: fixed;
-          top: 0; left: 0;
-          z-index: 2000;
-          overflow: hidden;
-        }
-        .login-v2-bg {
-          position: absolute;
-          width: 100%; height: 100%;
-          z-index: 0;
-        }
-        .glow-1 {
-          position: absolute;
-          top: -10%; left: -10%;
-          width: 60%; height: 60%;
-          background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
-          filter: blur(80px);
-        }
-        .glow-2 {
-          position: absolute;
-          bottom: -10%; right: -10%;
-          width: 60%; height: 60%;
-          background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
-          filter: blur(80px);
-        }
-        .login-v2-container {
-          position: relative;
-          z-index: 10;
-          width: 100%;
-          max-width: 440px;
-          padding: 48px;
-          border-radius: 24px;
-          background: rgba(255, 255, 255, 0.8);
-          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-        }
-        .login-v2-header {
-          text-align: center;
-          margin-bottom: 32px;
-        }
-        .login-v2-logo {
-          width: 56px;
-          height: 56px;
-          background: var(--p-primary);
-          border-radius: 16px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin: 0 auto 20px;
-          box-shadow: 0 8px 16px rgba(0,0,0,0.2);
-        }
-        .login-v2-header h1 {
-          font-size: 28px;
-          margin: 0;
-          color: var(--p-primary);
-          letter-spacing: -1px;
-        }
-        .login-v2-header p {
-          color: var(--p-text-muted);
-          font-size: 14px;
-          margin: 8px 0 0;
-          font-weight: 500;
-        }
-        .login-v2-error {
-          background: #fee2e2;
-          color: #991b1b;
-          padding: 12px 16px;
-          border-radius: 12px;
-          font-size: 13px;
-          font-weight: 600;
-          margin-bottom: 24px;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          border: 1px solid #fecaca;
-        }
-        .login-v2-btn {
-          width: 100%;
-          height: 52px;
-          margin-top: 12px;
-          font-size: 16px;
-        }
-        .login-v2-footer {
-          margin-top: 32px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 16px;
-        }
-        .secure-badge {
-          font-size: 12px;
-          font-weight: 800;
-          color: var(--p-text-muted);
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-        }
-        .bootstrap-btn {
-          background: transparent;
-          border: none;
-          color: var(--p-accent);
-          font-size: 12px;
-          font-weight: 700;
-          cursor: pointer;
-          transition: var(--transition-p);
-        }
-        .bootstrap-btn:hover {
-          color: var(--p-accent-deep);
-          text-decoration: underline;
-        }
-        .spin { animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      `}</style>
+  return (
+    <div className="min-h-screen flex">
+      {/* Left brand panel */}
+      <div
+        className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative overflow-hidden"
+        style={{ background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 60%, #0F172A 100%)' }}
+      >
+        {/* Background glow effects */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          aria-hidden="true"
+        >
+          <div
+            className="absolute"
+            style={{
+              top: '-10%',
+              left: '-10%',
+              width: '60%',
+              height: '60%',
+              background:
+                'radial-gradient(circle, rgba(37,99,235,0.18) 0%, transparent 70%)',
+              filter: 'blur(80px)',
+            }}
+          />
+          <div
+            className="absolute"
+            style={{
+              bottom: '-10%',
+              right: '-10%',
+              width: '60%',
+              height: '60%',
+              background:
+                'radial-gradient(circle, rgba(6,182,212,0.12) 0%, transparent 70%)',
+              filter: 'blur(80px)',
+            }}
+          />
         </div>
-    );
+
+        {/* Top logo */}
+        <div className="relative z-10">
+          <div className="flex items-center gap-4 mb-10">
+            <div
+              className="flex items-center justify-center rounded-2xl"
+              style={{
+                width: 56,
+                height: 56,
+                background: 'linear-gradient(135deg, #2563EB, #06B6D4)',
+                boxShadow: '0 8px 24px rgba(37,99,235,0.4)',
+              }}
+            >
+              <ShieldCheck size={28} color="white" strokeWidth={2} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-white tracking-tight">SiSPPD</p>
+              <p className="text-xs font-medium" style={{ color: '#94A3B8' }}>
+                v2.1 — Papua
+              </p>
+            </div>
+          </div>
+
+          <h1
+            className="text-4xl font-bold leading-tight mb-4"
+            style={{ color: '#F8FAFC' }}
+          >
+            Sistem Informasi<br />
+            <span style={{ color: '#06B6D4' }}>SPT & SPPD</span><br />
+            Terintegrasi
+          </h1>
+          <p className="text-base leading-relaxed mb-10" style={{ color: '#94A3B8' }}>
+            Platform digital terpadu untuk pengelolaan Surat Perintah Tugas
+            dan Surat Perintah Perjalanan Dinas di lingkungan Pemerintah Daerah.
+          </p>
+
+          <div className="space-y-4">
+            {features.map(({ icon: Icon, label }) => (
+              <div key={label} className="flex items-center gap-3">
+                <div
+                  className="flex items-center justify-center rounded-xl flex-shrink-0"
+                  style={{
+                    width: 36,
+                    height: 36,
+                    background: 'rgba(37,99,235,0.15)',
+                    border: '1px solid rgba(37,99,235,0.25)',
+                  }}
+                >
+                  <Icon size={16} color="#2563EB" />
+                </div>
+                <span className="text-sm font-medium" style={{ color: '#CBD5E1' }}>
+                  {label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="relative z-10">
+          <div
+            className="border-t pt-6"
+            style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+          >
+            <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: '#475569' }}>
+              Dikembangkan untuk
+            </p>
+            <p className="text-sm font-bold" style={{ color: '#94A3B8' }}>
+              Pemerintah Daerah Papua
+            </p>
+            <p className="text-xs mt-1" style={{ color: '#475569' }}>
+              &copy; {new Date().getFullYear()} SiSPPD. All rights reserved.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Right form panel */}
+      <div className="flex-1 flex items-center justify-center p-6 bg-slate-50">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: 'easeOut' }}
+          className="w-full max-w-md"
+        >
+          {/* Mobile logo */}
+          <div className="flex lg:hidden items-center gap-3 mb-8">
+            <div
+              className="flex items-center justify-center rounded-xl"
+              style={{
+                width: 44,
+                height: 44,
+                background: 'linear-gradient(135deg, #2563EB, #06B6D4)',
+              }}
+            >
+              <ShieldCheck size={22} color="white" />
+            </div>
+            <div>
+              <p className="text-xl font-bold text-slate-900">SiSPPD</p>
+              <p className="text-xs text-slate-500">Pemerintah Daerah Papua</p>
+            </div>
+          </div>
+
+          <div className="card p-8">
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold text-slate-900 mb-1">Selamat Datang</h2>
+              <p className="text-sm text-slate-500">
+                Masuk ke akun instansi Anda untuk melanjutkan.
+              </p>
+            </div>
+
+            {submitError && (
+              <div className="alert alert-danger mb-6">
+                <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+                <span>{submitError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit(onSubmit)} noValidate>
+              <div className="space-y-5">
+                {/* Email */}
+                <div className="form-group">
+                  <label className="form-label" htmlFor="email">
+                    Alamat Email <span className="required-mark">*</span>
+                  </label>
+                  <input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="nama@instansi.go.id"
+                    className={`form-input${errors.email ? ' is-error' : ''}`}
+                    {...register('email')}
+                    disabled={isSubmitting}
+                  />
+                  {errors.email && (
+                    <p className="form-error">
+                      <AlertCircle size={12} />
+                      {errors.email.message}
+                    </p>
+                  )}
+                </div>
+
+                {/* Password */}
+                <div className="form-group">
+                  <div className="flex items-center justify-between">
+                    <label className="form-label" htmlFor="password">
+                      Kata Sandi <span className="required-mark">*</span>
+                    </label>
+                    <Link
+                      to="/lupa-password"
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                    >
+                      Lupa Password?
+                    </Link>
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      placeholder="••••••••"
+                      className={`form-input pr-10${errors.password ? ' is-error' : ''}`}
+                      {...register('password')}
+                      disabled={isSubmitting}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                      tabIndex={-1}
+                      aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  {errors.password && (
+                    <p className="form-error">
+                      <AlertCircle size={12} />
+                      {errors.password.message}
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn btn-primary w-full py-3 text-base mt-2"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      Memproses...
+                    </>
+                  ) : (
+                    'Masuk ke Sistem'
+                  )}
+                </button>
+              </div>
+            </form>
+
+            <div className="mt-6 pt-6 border-t border-slate-100 flex flex-col items-center gap-3">
+              <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-slate-400">
+                <ShieldCheck size={13} />
+                Secure Authentication
+              </div>
+              <p className="text-xs text-slate-400 text-center">
+                Belum memiliki akun instansi?{' '}
+                <Link
+                  to="/daftar"
+                  className="font-semibold text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  Daftar Sekarang
+                </Link>
+              </p>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    </div>
+  );
 };
 
 export default Login;

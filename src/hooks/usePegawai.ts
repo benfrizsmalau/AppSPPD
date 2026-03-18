@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Pegawai, Pangkat, Golongan } from '../types';
+import type { Pegawai, RefPangkat, RefGolongan } from '../types';
 
 export const usePegawai = () => {
     const [pegawai, setPegawai] = useState<Pegawai[]>([]);
-    const [pangkats, setPangkats] = useState<Pangkat[]>([]);
-    const [golongans, setGolongans] = useState<Golongan[]>([]);
+    const [pangkats, setPangkats] = useState<RefPangkat[]>([]);
+    const [golongans, setGolongans] = useState<RefGolongan[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
