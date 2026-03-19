@@ -66,6 +66,7 @@ import type {
   MataAnggaran,
   DasarPerintah,
   JenisDasarPerintah,
+  KopSurat,
 } from '../types';
 
 // =================================================================
@@ -92,6 +93,7 @@ const dasarPerintahSchema = z.object({
 const sptSchema = z.object({
   tanggal_penetapan: z.string().min(1, 'Tanggal penetapan wajib diisi'),
   tempat_penetapan: z.string().min(1, 'Tempat penetapan wajib diisi'),
+  kop_surat: z.enum(['skpd', 'bupati', 'sekda']),
   instansi_id: z.number({ message: 'Pilih instansi' }).positive('Pilih instansi'),
   penandatangan_id: z.number({ message: 'Pilih penandatangan' }).positive('Pilih penandatangan'),
   dasar_perintah: z
@@ -166,12 +168,14 @@ const Stepper: React.FC<StepperProps> = ({ current, completedSteps, onChange }) 
 // SORTABLE DASAR PERINTAH ITEM
 // =================================================================
 interface SortableDasarProps {
-  item: DasarPerintah & { _id: string };
+  item: DasarPerintah & { id: string };
   index: number;
-  onUpdate: (index: number, field: keyof DasarPerintah, val: string) => void;
+  register: any;
+  setValue: any;
   onRemove: (index: number) => void;
-  errors?: Partial<Record<keyof DasarPerintah, { message?: string }>>;
+  errors?: any;
   canRemove: boolean;
+  currentJenis: JenisDasarPerintah;
 }
 
 const JENIS_OPTIONS: { value: JenisDasarPerintah; label: string; desc: string; color: string }[] = [
@@ -181,7 +185,7 @@ const JENIS_OPTIONS: { value: JenisDasarPerintah; label: string; desc: string; c
 ];
 
 const SortableDasarItem: React.FC<SortableDasarProps> = ({
-  item, index, onUpdate, onRemove, errors, canRemove,
+  item, index, register, setValue, onRemove, errors, canRemove, currentJenis
 }) => {
   const {
     attributes,
@@ -190,7 +194,7 @@ const SortableDasarItem: React.FC<SortableDasarProps> = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item._id });
+  } = useSortable({ id: item.id });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -198,6 +202,8 @@ const SortableDasarItem: React.FC<SortableDasarProps> = ({
     opacity: isDragging ? 0.5 : 1,
     zIndex: isDragging ? 10 : undefined,
   };
+
+  const namePrefix = `dasar_perintah.${index}` as const;
 
   return (
     <div
@@ -221,10 +227,10 @@ const SortableDasarItem: React.FC<SortableDasarProps> = ({
             <button
               key={opt.value}
               type="button"
-              onClick={() => onUpdate(index, 'jenis', opt.value)}
+              onClick={() => setValue(`${namePrefix}.jenis`, opt.value, { shouldDirty: true })}
               title={opt.desc}
               className={`px-3 py-1 rounded-lg border text-xs font-semibold transition-all ${
-                item.jenis === opt.value
+                currentJenis === opt.value
                   ? opt.color + ' ring-2 ring-offset-1 ring-current'
                   : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
               }`}
@@ -235,56 +241,52 @@ const SortableDasarItem: React.FC<SortableDasarProps> = ({
         </div>
 
         {/* ── Fields kondisional ── */}
-        {item.jenis === 'surat' ? (
+        {currentJenis === 'surat' ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div className="form-group">
               <label className="form-label text-xs">Nomor Surat <span className="required-mark">*</span></label>
               <input
                 className={`form-input text-sm ${errors?.nomor ? 'is-error' : ''}`}
                 placeholder="cth. 800/123/DINAS/2025"
-                value={item.nomor ?? ''}
-                onChange={e => onUpdate(index, 'nomor', e.target.value)}
+                {...register(`${namePrefix}.nomor`)}
               />
-              {errors?.nomor && <p className="form-error">{errors.nomor.message}</p>}
+              {errors?.nomor && <p className="form-error text-[10px]">{errors.nomor.message}</p>}
             </div>
             <div className="form-group">
               <label className="form-label text-xs">Tanggal <span className="required-mark">*</span></label>
               <input
                 type="date"
                 className={`form-input text-sm ${errors?.tanggal ? 'is-error' : ''}`}
-                value={item.tanggal ?? ''}
-                onChange={e => onUpdate(index, 'tanggal', e.target.value)}
+                {...register(`${namePrefix}.tanggal`)}
               />
-              {errors?.tanggal && <p className="form-error">{errors.tanggal.message}</p>}
+              {errors?.tanggal && <p className="form-error text-[10px]">{errors.tanggal.message}</p>}
             </div>
             <div className="form-group">
               <label className="form-label text-xs">Perihal <span className="required-mark">*</span></label>
               <input
                 className={`form-input text-sm ${errors?.perihal ? 'is-error' : ''}`}
                 placeholder="Perihal surat"
-                value={item.perihal}
-                onChange={e => onUpdate(index, 'perihal', e.target.value)}
+                {...register(`${namePrefix}.perihal`)}
               />
-              {errors?.perihal && <p className="form-error">{errors.perihal.message}</p>}
+              {errors?.perihal && <p className="form-error text-[10px]">{errors.perihal.message}</p>}
             </div>
           </div>
         ) : (
           <div className="form-group">
             <label className="form-label text-xs">
-              {item.jenis === 'lisan' ? 'Keterangan Perintah Lisan' : 'Keterangan'}{' '}
+              {currentJenis === 'lisan' ? 'Keterangan Perintah Lisan' : 'Keterangan'}{' '}
               <span className="required-mark">*</span>
             </label>
             <input
               className={`form-input text-sm ${errors?.perihal ? 'is-error' : ''}`}
               placeholder={
-                item.jenis === 'lisan'
+                currentJenis === 'lisan'
                   ? 'cth. Perintah lisan Kepala Dinas pada rapat tanggal ...'
                   : 'cth. Disposisi Sekretaris Daerah No. ...'
               }
-              value={item.perihal}
-              onChange={e => onUpdate(index, 'perihal', e.target.value)}
+              {...register(`${namePrefix}.perihal`)}
             />
-            {errors?.perihal && <p className="form-error">{errors.perihal.message}</p>}
+            {errors?.perihal && <p className="form-error text-[10px]">{errors.perihal.message}</p>}
           </div>
         )}
       </div>
@@ -412,10 +414,16 @@ const SPTPreviewPanel: React.FC<PreviewPanelProps> = ({
       {formValues.dasar_perintah?.length > 0 && (
         <div className="mb-3">
           <p className="font-semibold mb-1">Dasar:</p>
-          <ol className="list-decimal list-inside space-y-0.5 text-slate-600">
+          <ol className="list-decimal list-outside ml-6 space-y-1 text-slate-600">
             {formValues.dasar_perintah.map((d, i) => (
               <li key={i}>
-                {d.nomor} tanggal {d.tanggal ? format(new Date(d.tanggal), 'dd MMM yyyy', { locale: localeID }) : '—'} tentang {d.perihal}
+                {d.jenis === 'surat' ? (
+                  <>
+                    {d.nomor} tanggal {d.tanggal ? format(new Date(d.tanggal), 'dd MMM yyyy', { locale: localeID }) : '—'} tentang {d.perihal}
+                  </>
+                ) : (
+                  <>{d.perihal}</>
+                )}
               </li>
             ))}
           </ol>
@@ -432,9 +440,17 @@ const SPTPreviewPanel: React.FC<PreviewPanelProps> = ({
             <tbody>
               {selectedPegawai.map((p, i) => (
                 <tr key={p.id} className="border-b border-dashed border-slate-200 last:border-0">
-                  <td className="py-0.5 w-6">{i + 1}.</td>
-                  <td className="py-0.5 font-semibold">{p.nama_lengkap}</td>
-                  <td className="py-0.5 text-slate-500">{p.jabatan}</td>
+                  <td className="py-2 w-6 align-top font-bold text-slate-400">{i + 1}.</td>
+                  <td className="py-2 align-top">
+                    <p className="font-bold text-slate-900 leading-tight uppercase tracking-tight mb-1">{p.nama_lengkap}</p>
+                    <div className="space-y-0.5 text-[10px] text-slate-500 font-medium">
+                      <p>NIP. {p.nip}</p>
+                      {p.ref_pangkat?.nama && (
+                        <p>{p.ref_pangkat.nama}{p.ref_golongan?.nama ? ` (${p.ref_golongan.nama})` : ''}</p>
+                      )}
+                      <p className="text-blue-600 font-semibold uppercase">{p.jabatan}</p>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -446,7 +462,7 @@ const SPTPreviewPanel: React.FC<PreviewPanelProps> = ({
       {formValues.tujuan_kegiatan?.length > 0 && (
         <div className="mb-3">
           <p className="font-semibold mb-1">Untuk:</p>
-          <ol className="list-decimal list-inside space-y-0.5 text-slate-600">
+          <ol className="list-decimal list-outside ml-6 space-y-1 text-slate-600">
             {formValues.tujuan_kegiatan.map((t, i) => t && <li key={i}>{t}</li>)}
           </ol>
         </div>
@@ -469,13 +485,29 @@ const SPTPreviewPanel: React.FC<PreviewPanelProps> = ({
       )}
 
       {/* TTD */}
-      <div className="mt-6 text-right">
-        <p>Ditetapkan di {formValues.tempat_penetapan || '____________'}</p>
-        <p>Pada tanggal {today}</p>
-        <div className="h-16" />
-        <p className="font-semibold">{penandatangan?.nama_lengkap ?? '____________________'}</p>
-        <p className="text-slate-500">{penandatangan?.jabatan ?? 'Jabatan Penandatangan'}</p>
-        {penandatangan?.nip && <p className="text-slate-400">NIP. {penandatangan.nip}</p>}
+      <div className="mt-8 flex justify-end">
+        <div className="w-64 font-medium text-slate-700 text-center">
+          <p className="mb-0.5">Ditetapkan di {formValues.tempat_penetapan || '____________'}</p>
+          <p className="mb-6">Pada tanggal {today}</p>
+          
+          <p className="font-bold text-slate-900 leading-tight uppercase tracking-tight mb-16 underline-offset-4">
+            {penandatangan?.jabatan ?? 'JABATAN PENANDATANGAN'}
+          </p>
+          
+          <div className="space-y-0.5">
+            <p className="font-bold text-slate-900 uppercase tracking-tight underline italic">
+              {penandatangan?.nama_lengkap ?? 'NAMA PENANDATANGAN'}
+            </p>
+            {penandatangan?.ref_pangkat?.nama && (
+              <p className="text-[11px] text-slate-500">
+                {penandatangan.ref_pangkat.nama} {penandatangan.ref_golongan?.nama ? ` / ${penandatangan.ref_golongan.nama}` : ''}
+              </p>
+            )}
+            <p className="text-[11px] text-slate-400 font-mono">
+              NIP. {penandatangan?.nip ?? '___________________'}
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -609,6 +641,7 @@ const SPTForm: React.FC = () => {
   const defaultValues: SPTFormData = {
     tanggal_penetapan: new Date().toISOString().split('T')[0],
     tempat_penetapan: '',
+    kop_surat: 'skpd' as KopSurat,
     instansi_id: 0,
     penandatangan_id: 0,
     dasar_perintah: [{ id: crypto.randomUUID(), jenis: 'surat' as JenisDasarPerintah, nomor: '', tanggal: '', perihal: '' }],
@@ -668,6 +701,7 @@ const SPTForm: React.FC = () => {
       reset({
         tanggal_penetapan: existingSPT.tanggal_penetapan,
         tempat_penetapan: existingSPT.tempat_penetapan,
+        kop_surat: (existingSPT.kop_surat ?? 'skpd') as KopSurat,
         instansi_id: existingSPT.instansi_id ?? 0,
         penandatangan_id: existingSPT.penandatangan_id ?? 0,
         dasar_perintah: dasarPerintah,
@@ -691,11 +725,20 @@ const SPTForm: React.FC = () => {
 
   // Auto-populate tempat penetapan
   useEffect(() => {
-    if (!isEdit && !watchedValues.tempat_penetapan) {
-      const instansi = instansiList.find(i => i.id === watchedValues.instansi_id);
-      if (instansi?.kabupaten_kota) setValue('tempat_penetapan', instansi.kabupaten_kota);
+    const instansi = instansiList.find(i => i.id === watchedValues.instansi_id);
+    if (instansi) {
+      const defaultValue = instansi.ibu_kota || instansi.kabupaten_kota || '';
+      const currentVal = (watchedValues.tempat_penetapan || '').trim().toLowerCase();
+      const countyVal = (instansi.kabupaten_kota || '').trim().toLowerCase();
+      
+      // Force change ONLY if currently empty or matches the old county name (case-insensitive)
+      if (!currentVal || currentVal === countyVal) {
+        if (watchedValues.tempat_penetapan !== defaultValue) {
+          setValue('tempat_penetapan', defaultValue);
+        }
+      }
     }
-  }, [watchedValues.instansi_id, instansiList, isEdit, watchedValues.tempat_penetapan, setValue]);
+  }, [watchedValues.instansi_id, instansiList, setValue]);
 
   // ── Auto-Save every 30s ──────────────────────────────────────
   const performAutoSave = useCallback(async () => {
@@ -882,12 +925,6 @@ const SPTForm: React.FC = () => {
   };
 
   // ── Dasar perintah helpers ──────────────────────────────────
-  const handleUpdateDasar = (idx: number, field: keyof DasarPerintah, val: string) => {
-    const current = getValues('dasar_perintah');
-    const next = [...current];
-    next[idx] = { ...next[idx], [field]: val };
-    setValue('dasar_perintah', next, { shouldDirty: true });
-  };
 
   // ── Step validation ──────────────────────────────────────────
   const validateAndGoNext = async () => {
@@ -1023,6 +1060,76 @@ const SPTForm: React.FC = () => {
                 <FileText size={17} className="text-blue-500" /> Identitas Dokumen
               </h2>
 
+              {/* ── Kop Surat Selector ────────────────────────────── */}
+              <div className="form-group">
+                <label className="form-label">
+                  Kop Surat <span className="required-mark">*</span>
+                </label>
+                <p className="form-hint mb-2">Pilih sesuai pejabat yang menandatangani SPT.</p>
+                <Controller
+                  control={control}
+                  name="kop_surat"
+                  render={({ field }) => (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {([
+                        {
+                          value: 'skpd' as KopSurat,
+                          icon: '🏢',
+                          title: 'Kop SKPD',
+                          desc: 'Dinas / Badan / Kantor — ditandatangani Kepala SKPD',
+                          color: 'border-blue-400 bg-blue-50 ring-blue-400',
+                          inactive: 'border-slate-200 hover:border-blue-200 hover:bg-blue-50/50',
+                        },
+                        {
+                          value: 'bupati' as KopSurat,
+                          icon: '👑',
+                          title: 'Kop Bupati / Walikota',
+                          desc: 'Ditetapkan langsung oleh Bupati / Walikota',
+                          color: 'border-amber-400 bg-amber-50 ring-amber-400',
+                          inactive: 'border-slate-200 hover:border-amber-200 hover:bg-amber-50/50',
+                        },
+                        {
+                          value: 'sekda' as KopSurat,
+                          icon: '🏛️',
+                          title: 'Kop Sekretariat Daerah',
+                          desc: 'Atas nama Sekretaris Daerah',
+                          color: 'border-violet-400 bg-violet-50 ring-violet-400',
+                          inactive: 'border-slate-200 hover:border-violet-200 hover:bg-violet-50/50',
+                        },
+                      ] as const).map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => field.onChange(opt.value)}
+                          className={`text-left p-4 rounded-xl border-2 transition-all ${
+                            field.value === opt.value
+                              ? opt.color + ' ring-2 ring-offset-2'
+                              : opt.inactive + ' bg-white'
+                          }`}
+                        >
+                          <div className="text-2xl mb-1">{opt.icon}</div>
+                          <p className="text-sm font-bold text-slate-800">{opt.title}</p>
+                          <p className="text-xs text-slate-500 mt-0.5 leading-snug">{opt.desc}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                />
+                {/* Info box — muncul saat kop bukan SKPD dan instansi belum dikonfigurasi */}
+                {watch('kop_surat') !== 'skpd' && (() => {
+                  const sel = instansiList.find(i => i.id === watch('instansi_id'));
+                  const needsConfig = watch('kop_surat') === 'bupati'
+                    ? !sel?.jabatan_kepala_daerah
+                    : !sel?.alamat_sekda && !sel?.telepon_sekda;
+                  return needsConfig ? (
+                    <div className="alert alert-warning mt-2 text-xs">
+                      ⚠️ Konfigurasi kop {watch('kop_surat') === 'bupati' ? 'Bupati' : 'Sekda'} belum diatur.{' '}
+                      <a href="/settings" className="underline font-semibold">Lengkapi di Pengaturan → Institusi</a>
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="form-group">
                   <label className="form-label">
@@ -1155,12 +1262,14 @@ const SPTForm: React.FC = () => {
                       {dasarFields.map((field, idx) => (
                         <SortableDasarItem
                           key={field.id}
-                          item={{ ...field, _id: field.id }}
+                          item={field}
                           index={idx}
-                          onUpdate={handleUpdateDasar}
+                          register={register}
+                          setValue={setValue}
                           onRemove={idx2 => removeDasar(idx2)}
-                          errors={errors.dasar_perintah?.[idx] as Record<keyof DasarPerintah, { message?: string }> | undefined}
+                          errors={errors.dasar_perintah?.[idx]}
                           canRemove={dasarFields.length > 1}
+                          currentJenis={watchedValues.dasar_perintah?.[idx]?.jenis || 'surat'}
                         />
                       ))}
                     </div>
@@ -1502,6 +1611,7 @@ function buildPayload(
     tenant_id: tenantId,
     tanggal_penetapan: data.tanggal_penetapan,
     tempat_penetapan: data.tempat_penetapan,
+    kop_surat: data.kop_surat,
     instansi_id: data.instansi_id || null,
     penandatangan_id: data.penandatangan_id || null,
     dasar_perintah: data.dasar_perintah,

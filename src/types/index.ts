@@ -80,6 +80,8 @@ export interface RefAlatAngkut {
   is_global: boolean;
 }
 
+export type KopSurat = 'skpd' | 'bupati' | 'sekda';
+
 export interface Instansi {
   id: number;
   tenant_id: string;
@@ -89,12 +91,20 @@ export interface Instansi {
   logo_kabupaten_path?: string;
   alamat: string;
   kabupaten_kota: string;
+  ibu_kota?: string;
   provinsi: string;
   kode_pos?: string;
   telepon?: string;
   email?: string;
   website?: string;
   is_primary: boolean;
+  // ── Kop Bupati / Kepala Daerah ──────────────────────────────────
+  jabatan_kepala_daerah?: string;  // cth: "BUPATI PEGUNUNGAN BINTANG"
+  alamat_bupati?: string;          // alamat kantor Bupati (jika berbeda)
+  telepon_bupati?: string;
+  // ── Kop Sekretariat Daerah ──────────────────────────────────────
+  alamat_sekda?: string;           // alamat Setda (jika berbeda)
+  telepon_sekda?: string;
   created_at: string;
   updated_at: string;
 }
@@ -192,6 +202,7 @@ export interface SPT {
   mata_anggaran_id?: number;
   penandatangan_id?: number;
   instansi_id?: number;
+  kop_surat: KopSurat;
   status: DocumentStatus;
   pdf_file_path?: string;
   catatan?: string;
@@ -222,6 +233,7 @@ export interface SPTPegawai {
 export interface SPTFormValues {
   tanggal_penetapan: string;
   tempat_penetapan: string;
+  kop_surat: KopSurat;
   dasar_perintah: DasarPerintah[];
   tujuan_kegiatan: string[];
   lama_kegiatan: number;

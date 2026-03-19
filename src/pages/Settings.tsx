@@ -424,9 +424,16 @@ const Settings: React.FC = () => {
 
   // ── Queries ──────────────────────────────────────────────────────────────
   const { data: instansi, isLoading: loadingInstansi } = useQuery<Instansi | null>({
-    queryKey: ['instansi', tenantId],
+    queryKey: ['instansi-primary', tenantId],
     queryFn: async () => {
-      const { data } = await supabase.from('instansi').select('*').eq('tenant_id', tenantId!).eq('is_primary', true).maybeSingle();
+      const { data, error } = await supabase
+        .from('instansi')
+        .select('*')
+        .eq('tenant_id', tenantId!)
+        .order('is_primary', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
       return data;
     },
     enabled: !!tenantId,
@@ -493,7 +500,11 @@ const Settings: React.FC = () => {
         if (error) throw error;
       }
     },
-    onSuccess: () => { toast.success('Data instansi berhasil disimpan.'); qc.invalidateQueries({ queryKey: ['instansi'] }); },
+    onSuccess: () => {
+      toast.success('Data instansi berhasil disimpan.');
+      qc.invalidateQueries({ queryKey: ['instansi-primary'] });
+      qc.invalidateQueries({ queryKey: ['instansi'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -775,6 +786,11 @@ const Settings: React.FC = () => {
                       <label className="form-label">Nama Singkat</label>
                       <input className="form-input" value={instansiForm.nama_singkat ?? ''} onChange={e => setInstansiForm(f => ({ ...f, nama_singkat: e.target.value }))} placeholder="BPPKAD" />
                     </div>
+                    <div className="form-group text-blue-600">
+                      <label className="form-label text-blue-600">Ibu Kota Kabupaten/Kota</label>
+                      <input className="form-input border-blue-200 bg-blue-50/30" value={instansiForm.ibu_kota ?? ''} onChange={e => setInstansiForm(f => ({ ...f, ibu_kota: e.target.value }))} placeholder="Contoh: Burmeso" />
+                      <p className="text-[10px] text-blue-500 mt-1 italic">Lokasi yang akan muncul sebagai tempat penetapan (Ditetapkan di...)</p>
+                    </div>
                     <div className="form-group">
                       <label className="form-label">Kabupaten/Kota</label>
                       <input className="form-input" value={instansiForm.kabupaten_kota ?? ''} onChange={e => setInstansiForm(f => ({ ...f, kabupaten_kota: e.target.value }))} placeholder="Contoh Utara" />
@@ -810,6 +826,80 @@ const Settings: React.FC = () => {
                   <div className="card-body grid grid-cols-1 md:grid-cols-2 gap-6">
                     <LogoUpload label="Logo Instansi / SKPD" currentUrl={instansiForm.logo_path} onUpload={f => uploadLogo('logo_path', f)} />
                     <LogoUpload label="Logo Kabupaten/Kota" currentUrl={instansiForm.logo_kabupaten_path} onUpload={f => uploadLogo('logo_kabupaten_path', f)} />
+                  </div>
+                </div>
+
+                {/* ── Kop Bupati ───────────────────────────────────────── */}
+                <div className="card">
+                  <div className="card-header">
+                    <span className="text-lg">👑</span>
+                    <span className="font-bold text-slate-800 ml-1.5">Konfigurasi Kop Bupati / Walikota</span>
+                  </div>
+                  <div className="card-body space-y-4">
+                    <p className="text-xs text-slate-500">Digunakan saat SPT ditetapkan langsung oleh Bupati/Walikota. Jika dikosongkan, sistem akan menggunakan format default dari nama kabupaten/kota.</p>
+                    <div className="form-group">
+                      <label className="form-label text-xs">Jabatan Kepala Daerah</label>
+                      <input
+                        className="form-input"
+                        value={instansiForm.jabatan_kepala_daerah ?? ''}
+                        onChange={e => setInstansiForm(f => ({ ...f, jabatan_kepala_daerah: e.target.value }))}
+                        placeholder="cth: BUPATI PEGUNUNGAN BINTANG"
+                      />
+                      <p className="form-hint">Teks ini tampil sebagai judul kop. Gunakan huruf kapital.</p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="form-group">
+                        <label className="form-label text-xs">Alamat Kantor Bupati</label>
+                        <textarea
+                          className="form-textarea"
+                          rows={2}
+                          value={instansiForm.alamat_bupati ?? ''}
+                          onChange={e => setInstansiForm(f => ({ ...f, alamat_bupati: e.target.value }))}
+                          placeholder="Kosongkan jika sama dengan alamat instansi"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label text-xs">Telepon Kantor Bupati</label>
+                        <input
+                          className="form-input"
+                          value={instansiForm.telepon_bupati ?? ''}
+                          onChange={e => setInstansiForm(f => ({ ...f, telepon_bupati: e.target.value }))}
+                          placeholder="Kosongkan jika sama"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Kop Sekretariat Daerah ───────────────────────────── */}
+                <div className="card">
+                  <div className="card-header">
+                    <span className="text-lg">🏛️</span>
+                    <span className="font-bold text-slate-800 ml-1.5">Konfigurasi Kop Sekretariat Daerah</span>
+                  </div>
+                  <div className="card-body space-y-4">
+                    <p className="text-xs text-slate-500">Digunakan saat SPT ditetapkan atas nama Sekretaris Daerah. Format otomatis: "PEMERINTAH KABUPATEN X / SEKRETARIAT DAERAH".</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="form-group">
+                        <label className="form-label text-xs">Alamat Sekretariat Daerah</label>
+                        <textarea
+                          className="form-textarea"
+                          rows={2}
+                          value={instansiForm.alamat_sekda ?? ''}
+                          onChange={e => setInstansiForm(f => ({ ...f, alamat_sekda: e.target.value }))}
+                          placeholder="Kosongkan jika sama dengan alamat instansi"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label text-xs">Telepon Sekretariat Daerah</label>
+                        <input
+                          className="form-input"
+                          value={instansiForm.telepon_sekda ?? ''}
+                          onChange={e => setInstansiForm(f => ({ ...f, telepon_sekda: e.target.value }))}
+                          placeholder="Kosongkan jika sama"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

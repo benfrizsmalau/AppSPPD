@@ -4,6 +4,11 @@
 -- Multi-Tenant | RLS | Audit Trail | Atomic Numbering
 -- =================================================================
 
+-- 0. CLEAN SLATE (UNCOMMENT TO RESET DATABASE)
+-- DROP VIEW IF EXISTS v_mata_anggaran_realisasi CASCADE;
+-- DROP TABLE IF EXISTS sppd_realisasi, sppd_pengikut, sppd, spt_pegawai, spt, setting_penomoran, nomor_history, penandatangan, pegawai, user_profiles, mata_anggaran, instansi, ref_alat_angkut, ref_tingkat_perjalanan, ref_golongan, ref_pangkat, tenants, super_admins, audit_log, login_events, notifikasi, approval_log, approval_config CASCADE;
+-- DROP TYPE IF EXISTS user_role CASCADE;
+
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -94,12 +99,22 @@ CREATE TABLE IF NOT EXISTS instansi (
   logo_kabupaten_path TEXT,
   alamat TEXT NOT NULL,
   kabupaten_kota VARCHAR(100) NOT NULL,
+  ibu_kota VARCHAR(100),
   provinsi VARCHAR(100) NOT NULL,
   kode_pos VARCHAR(10),
   telepon VARCHAR(20),
   email VARCHAR(100),
   website VARCHAR(100),
   is_primary BOOLEAN DEFAULT FALSE,
+  -- ── Kop Bupati / Kepala Daerah ──────────────────────────────
+  -- Digunakan saat SPT diterbitkan atas nama Bupati/Walikota
+  jabatan_kepala_daerah VARCHAR(200),   -- cth: "BUPATI PEGUNUNGAN BINTANG"
+  alamat_bupati TEXT,                   -- alamat kantor Bupati (jika berbeda)
+  telepon_bupati VARCHAR(50),
+  -- ── Kop Sekretariat Daerah ──────────────────────────────────
+  -- Digunakan saat SPT diterbitkan atas nama Sekda
+  alamat_sekda TEXT,                    -- alamat Setda (jika berbeda)
+  telepon_sekda VARCHAR(50),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -119,19 +134,6 @@ CREATE TABLE IF NOT EXISTS mata_anggaran (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(tenant_id, kode, tahun)
 );
-
--- View: budget realization
-CREATE OR REPLACE VIEW v_mata_anggaran_realisasi AS
-SELECT
-  ma.*,
-  COUNT(s.id) AS jumlah_sppd,
-  COALESCE(SUM(s.lama_perjalanan), 0) AS total_hari,
-  COALESCE(ma.pagu, 0) AS pagu_anggaran
-FROM mata_anggaran ma
-LEFT JOIN sppd s ON s.mata_anggaran_id = ma.id
-  AND s.status IN ('Final','Printed','Completed')
-  AND s.tenant_id = ma.tenant_id
-GROUP BY ma.id;
 
 -- =================================================================
 -- 5. USER PROFILES & RBAC
@@ -255,6 +257,8 @@ CREATE TABLE IF NOT EXISTS spt (
   mata_anggaran_id INT REFERENCES mata_anggaran(id),
   penandatangan_id INT REFERENCES penandatangan(id),
   instansi_id INT REFERENCES instansi(id),
+  kop_surat TEXT NOT NULL DEFAULT 'skpd'
+    CHECK (kop_surat IN ('skpd','bupati','sekda')),
   status TEXT NOT NULL DEFAULT 'Draft'
     CHECK (status IN ('Draft','Menunggu Persetujuan','Final','Printed','Completed','Cancelled','Expired')),
   pdf_file_path TEXT,
@@ -358,6 +362,22 @@ CREATE TABLE IF NOT EXISTS sppd_realisasi (
   catatan TEXT,
   UNIQUE(sppd_id, section)
 );
+
+-- =================================================================
+-- VIEWS
+-- =================================================================
+-- View: budget realization
+CREATE OR REPLACE VIEW v_mata_anggaran_realisasi AS
+SELECT
+  ma.*,
+  COUNT(s.id) AS jumlah_sppd,
+  COALESCE(SUM(s.lama_perjalanan), 0) AS total_hari,
+  COALESCE(ma.pagu, 0) AS pagu_anggaran
+FROM mata_anggaran ma
+LEFT JOIN sppd s ON s.mata_anggaran_id = ma.id
+  AND s.status IN ('Final','Printed','Completed')
+  AND s.tenant_id = ma.tenant_id
+GROUP BY ma.id;
 
 -- =================================================================
 -- 11. APPROVAL WORKFLOW
@@ -695,7 +715,7 @@ $$;
 -- =================================================================
 -- JWT HOOK: inject tenant_id & role into JWT claims
 -- =================================================================
-CREATE OR REPLACE FUNCTION auth.custom_access_token_hook(event JSONB)
+CREATE OR REPLACE FUNCTION public.custom_access_token_hook(event JSONB)
 RETURNS JSONB AS $$
 DECLARE
   v_profile RECORD;
@@ -917,3 +937,15 @@ INSERT INTO ref_alat_angkut (tenant_id, nama, is_global) VALUES
 (NULL, 'Kendaraan Pribadi', TRUE),
 (NULL, 'Lainnya', TRUE)
 ON CONFLICT DO NOTHING;
+
+-- =================================================================
+-- MIGRATION: Kop Surat Hierarki (tambahkan ke database yang sudah ada)
+-- Jalankan script ini jika database sudah berjalan sebelum update ini
+-- =================================================================
+-- ALTER TABLE instansi ADD COLUMN IF NOT EXISTS jabatan_kepala_daerah VARCHAR(200);
+-- ALTER TABLE instansi ADD COLUMN IF NOT EXISTS alamat_bupati TEXT;
+-- ALTER TABLE instansi ADD COLUMN IF NOT EXISTS telepon_bupati VARCHAR(50);
+-- ALTER TABLE instansi ADD COLUMN IF NOT EXISTS alamat_sekda TEXT;
+-- ALTER TABLE instansi ADD COLUMN IF NOT EXISTS telepon_sekda VARCHAR(50);
+-- ALTER TABLE spt ADD COLUMN IF NOT EXISTS kop_surat TEXT NOT NULL DEFAULT 'skpd'
+--   CHECK (kop_surat IN ('skpd','bupati','sekda'));

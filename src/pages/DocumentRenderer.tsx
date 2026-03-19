@@ -4,14 +4,15 @@ import { supabase } from '../lib/supabase';
 import { format } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
 import { Printer, ArrowLeft, FileText, Loader2, Hash } from 'lucide-react';
-import type { SPT, SPPD, Pegawai, Penandatangan, DasarPerintah } from '../types';
+import type { SPT, SPPD, Penandatangan, DasarPerintah, Instansi, KopSurat } from '../types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function formatNamaLengkap(p: Partial<Pegawai> | Partial<Penandatangan> | null | undefined): string {
+function formatNamaLengkap(p: any): string {
   if (!p) return '—';
-  const { gelar_depan, nama_lengkap, gelar_belakang } = p as {
-    gelar_depan?: string; nama_lengkap: string; gelar_belakang?: string;
-  };
+  const gelar_depan = p.gelar_depan || '';
+  const nama_lengkap = p.nama_lengkap || '';
+  const gelar_belakang = p.gelar_belakang || '';
+  if (!nama_lengkap) return '—';
   return [gelar_depan, nama_lengkap, gelar_belakang].filter(Boolean).join(' ');
 }
 
@@ -30,17 +31,19 @@ export function fmtDateRoman(d: string | null | undefined): string {
 }
 
 // ─── KOP SURAT ────────────────────────────────────────────────────────────────
-interface KopSuratProps {
-  instansi: SPT['instansi'] | SPPD['instansi'];
-}
-const KopSurat: React.FC<KopSuratProps> = ({ instansi }) => (
-  <div style={{ display: 'flex', alignItems: 'stretch', borderBottom: '4px double #000', paddingBottom: '6px', marginBottom: '14px' }}>
+// ─── Kop Surat — 3 Varian ────────────────────────────────────────────────────
+const borderBottom = '3.5px double #000';
+const kopFont: React.CSSProperties = { fontFamily: '"Times New Roman", Times, serif' };
+
+/** Kop SKPD — format standar: Logo Kab | Pemerintah + Nama SKPD | Logo SKPD */
+const KopSKPD: React.FC<{ instansi: Instansi | null | undefined }> = ({ instansi }) => (
+  <div style={{ display: 'flex', alignItems: 'stretch', borderBottom, paddingBottom: '4px', marginBottom: '8px' }}>
     <div style={{ width: '85px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      {instansi?.logo_kabupaten_path
-        ? <img src={instansi.logo_kabupaten_path} alt="Logo Kab" style={{ width: '70px', height: 'auto', objectFit: 'contain' }} />
-        : <div style={{ width: 70, height: 70, background: '#f1f5f9', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9pt', color: '#94a3b8' }}>Logo Kab</div>}
+      {instansi?.logo_kabupaten_path && (
+        <img src={instansi.logo_kabupaten_path} alt="Logo Kab" style={{ width: '70px', height: 'auto', objectFit: 'contain' }} />
+      )}
     </div>
-    <div style={{ flex: 1, textAlign: 'center', padding: '0 8px', fontFamily: '"Times New Roman", Times, serif' }}>
+    <div style={{ flex: 1, textAlign: 'center', padding: '0 8px', ...kopFont }}>
       <p style={{ margin: 0, fontSize: '12pt', fontWeight: 'bold', lineHeight: 1.2 }}>
         PEMERINTAH {instansi?.kabupaten_kota ? `KABUPATEN ${instansi.kabupaten_kota.toUpperCase()}` : ''}
       </p>
@@ -50,20 +53,95 @@ const KopSurat: React.FC<KopSuratProps> = ({ instansi }) => (
       {instansi?.alamat && <p style={{ margin: '2px 0 0', fontSize: '9pt', lineHeight: 1.3, color: '#333' }}>{instansi.alamat}</p>}
       {(instansi?.telepon || instansi?.email) && (
         <p style={{ margin: 0, fontSize: '8pt', color: '#444' }}>
-          {instansi.telepon && `Telp. ${instansi.telepon}`}
-          {instansi.telepon && instansi.email && ' | '}
-          {instansi.email && `Email: ${instansi.email}`}
+          {instansi?.telepon && `Telp. ${instansi.telepon}`}
+          {instansi?.telepon && instansi?.email && ' | '}
+          {instansi?.email && `Email: ${instansi.email}`}
           {instansi?.kode_pos && ` | Kode Pos: ${instansi.kode_pos}`}
         </p>
       )}
     </div>
     <div style={{ width: '85px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      {instansi?.logo_path
-        ? <img src={instansi.logo_path} alt="Logo SKPD" style={{ width: '70px', height: 'auto', objectFit: 'contain' }} />
-        : <div style={{ width: 70, height: 70, background: '#f1f5f9', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9pt', color: '#94a3b8' }}>Logo</div>}
+      {instansi?.logo_path && (
+        <img src={instansi.logo_path} alt="Logo SKPD" style={{ width: '70px', height: 'auto', objectFit: 'contain' }} />
+      )}
     </div>
   </div>
 );
+
+/** Kop Bupati/Walikota — Logo Kabupaten center, nama jabatan kepala daerah */
+const KopBupati: React.FC<{ instansi: Instansi | null | undefined }> = ({ instansi }) => {
+  const jabatan = instansi?.jabatan_kepala_daerah
+    ?? (instansi?.kabupaten_kota ? `BUPATI ${instansi.kabupaten_kota.toUpperCase()}` : 'BUPATI');
+  const alamat = instansi?.alamat_bupati ?? instansi?.alamat;
+  const telepon = instansi?.telepon_bupati ?? instansi?.telepon;
+  return (
+    <div style={{ display: 'flex', alignItems: 'stretch', borderBottom, paddingBottom: '4px', marginBottom: '8px' }}>
+      <div style={{ width: '85px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {instansi?.logo_kabupaten_path && (
+          <img src={instansi.logo_kabupaten_path} alt="Logo Kab" style={{ width: '75px', height: 'auto', objectFit: 'contain' }} />
+        )}
+      </div>
+      <div style={{ flex: 1, textAlign: 'center', padding: '0 8px', ...kopFont }}>
+        <p style={{ margin: 0, fontSize: '16pt', fontWeight: 'bold', lineHeight: 1.2, letterSpacing: '1px' }}>
+          {jabatan}
+        </p>
+        {alamat && <p style={{ margin: '3px 0 0', fontSize: '9pt', lineHeight: 1.3, color: '#333' }}>{alamat}</p>}
+        {telepon && (
+          <p style={{ margin: 0, fontSize: '8pt', color: '#444' }}>Telp. {telepon}</p>
+        )}
+      </div>
+      <div style={{ width: '85px' }} /> {/* spacer agar center seimbang */}
+    </div>
+  );
+};
+
+/** Kop Sekretariat Daerah — Logo Kab + Logo Pemda, Pemerintah + Sekretariat Daerah */
+const KopSekda: React.FC<{ instansi: Instansi | null | undefined }> = ({ instansi }) => {
+  const alamat = instansi?.alamat_sekda ?? instansi?.alamat;
+  const telepon = instansi?.telepon_sekda ?? instansi?.telepon;
+  return (
+    <div style={{ display: 'flex', alignItems: 'stretch', borderBottom, paddingBottom: '4px', marginBottom: '8px' }}>
+      <div style={{ width: '85px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {instansi?.logo_kabupaten_path && (
+          <img src={instansi.logo_kabupaten_path} alt="Logo Kab" style={{ width: '70px', height: 'auto', objectFit: 'contain' }} />
+        )}
+      </div>
+      <div style={{ flex: 1, textAlign: 'center', padding: '0 8px', ...kopFont }}>
+        <p style={{ margin: 0, fontSize: '12pt', fontWeight: 'bold', lineHeight: 1.2 }}>
+          PEMERINTAH {instansi?.kabupaten_kota ? `KABUPATEN ${instansi.kabupaten_kota.toUpperCase()}` : ''}
+        </p>
+        <p style={{ margin: '3px 0 0', fontSize: '15pt', fontWeight: 'bold', lineHeight: 1.2, letterSpacing: '0.5px' }}>
+          SEKRETARIAT DAERAH
+        </p>
+        {alamat && <p style={{ margin: '2px 0 0', fontSize: '9pt', lineHeight: 1.3, color: '#333' }}>{alamat}</p>}
+        {(telepon || instansi?.email) && (
+          <p style={{ margin: 0, fontSize: '8pt', color: '#444' }}>
+            {telepon && `Telp. ${telepon}`}
+            {telepon && instansi?.email && ' | '}
+            {instansi?.email && `Email: ${instansi.email}`}
+            {instansi?.kode_pos && ` | Kode Pos: ${instansi.kode_pos}`}
+          </p>
+        )}
+      </div>
+      <div style={{ width: '85px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {instansi?.logo_path && (
+          <img src={instansi.logo_path} alt="Logo Pemda" style={{ width: '70px', height: 'auto', objectFit: 'contain' }} />
+        )}
+      </div>
+    </div>
+  );
+};
+
+/** Router — pilih kop sesuai jenis */
+interface KopSuratProps {
+  instansi: Instansi | null | undefined;
+  jenis?: KopSurat;
+}
+const KopSurat: React.FC<KopSuratProps> = ({ instansi, jenis = 'skpd' }) => {
+  if (jenis === 'bupati') return <KopBupati instansi={instansi} />;
+  if (jenis === 'sekda') return <KopSekda instansi={instansi} />;
+  return <KopSKPD instansi={instansi} />;
+};
 
 // ─── Signature Block ──────────────────────────────────────────────────────────
 interface SignatureBlockProps {
@@ -75,16 +153,24 @@ interface SignatureBlockProps {
 const SignatureBlock: React.FC<SignatureBlockProps> = ({ label, place, date, penandatangan }) => (
   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px', pageBreakInside: 'avoid' }}>
     <div style={{ width: '320px', textAlign: 'center', fontFamily: '"Times New Roman", Times, serif' }}>
-      <p style={{ margin: 0, fontSize: '11pt' }}>{label ?? 'Ditetapkan di'} : {place}</p>
-      <p style={{ margin: '2px 0 0', fontSize: '11pt' }}>Pada tanggal : {fmtDate(date)}</p>
-      <p style={{ margin: '10px 0 0', fontSize: '11pt', fontWeight: 'bold' }}>{penandatangan?.jabatan ?? ''}</p>
-      <div style={{ height: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ textAlign: 'left', marginBottom: '8px' }}>
+        <p style={{ margin: 0, fontSize: '10.5pt' }}>{label ?? 'Ditetapkan di'} : {place}</p>
+        <p style={{ margin: '1px 0 0', fontSize: '10.5pt' }}>Pada tanggal : {fmtDate(date)}</p>
+      </div>
+
+      <p style={{ margin: 0, fontSize: '10.5pt', fontWeight: 'bold', textTransform: 'uppercase' }}>{penandatangan?.jabatan ?? ''}</p>
+      <div style={{ height: '55px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {penandatangan?.ttd_digital_path && (
-          <img src={penandatangan.ttd_digital_path} alt="TTD" style={{ height: '62px', mixBlendMode: 'multiply', objectFit: 'contain' }} />
+          <img src={penandatangan.ttd_digital_path} alt="TTD" style={{ height: '65px', mixBlendMode: 'multiply', objectFit: 'contain' }} />
         )}
       </div>
       <p style={{ margin: 0, fontSize: '11.5pt', fontWeight: 'bold', textDecoration: 'underline' }}>{formatNamaLengkap(penandatangan)}</p>
-      {penandatangan?.ref_pangkat && <p style={{ margin: 0, fontSize: '10.5pt' }}>{penandatangan.ref_pangkat.nama}</p>}
+      {penandatangan?.ref_pangkat && (
+        <p style={{ margin: 0, fontSize: '10.5pt' }}>
+          {penandatangan.ref_pangkat.nama}
+          {penandatangan.ref_golongan?.nama ? ` / ${penandatangan.ref_golongan.nama}` : ''}
+        </p>
+      )}
       <p style={{ margin: 0, fontSize: '10.5pt' }}>NIP. {penandatangan?.nip ?? ''}</p>
     </div>
   </div>
@@ -113,13 +199,15 @@ const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
   return (
     <div style={{ position: 'relative' }}>
       {isDraft && <DraftWatermark />}
-      <KopSurat instansi={data.instansi} />
+      <KopSurat instansi={data.instansi} jenis={data.kop_surat ?? 'skpd'} />
 
-      <div style={{ fontFamily: '"Times New Roman", Times, serif', fontSize: '12pt', color: '#000', lineHeight: 1.6 }}>
+      <div style={{ fontFamily: '"Times New Roman", Times, serif', fontSize: '11.5pt', color: '#000', lineHeight: 1.5 }}>
         {/* Title */}
-        <div style={{ textAlign: 'center', marginBottom: '12px' }}>
-          <h3 style={{ margin: 0, fontSize: '13pt', fontWeight: 'bold', textDecoration: 'underline', letterSpacing: '1px' }}>SURAT PERINTAH TUGAS</h3>
-          {data.nomor_spt && <p style={{ margin: '3px 0 0', fontSize: '11pt' }}>Nomor : <strong>{data.nomor_spt}</strong></p>}
+        <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+          <h3 style={{ margin: 0, fontSize: '12pt', fontWeight: 'bold', textDecoration: 'underline', letterSpacing: '1px' }}>SURAT PERINTAH TUGAS</h3>
+          <p style={{ margin: '1px 0 0', fontSize: '10.5pt' }}>
+            Nomor : <strong>{data.nomor_spt || `DRAFT-${data.tanggal_penetapan?.replace(/-/g, '') || '________'}`}</strong>
+          </p>
         </div>
 
         {/* Dasar */}
@@ -129,19 +217,24 @@ const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
               <td style={{ width: '90px', verticalAlign: 'top', paddingRight: '4px' }}>Dasar :</td>
               <td style={{ verticalAlign: 'top' }}>
                 {Array.isArray(data.dasar_perintah) && data.dasar_perintah.length > 0 ? (
-                  <ol style={{ margin: 0, paddingLeft: '18px' }}>
-                    {(data.dasar_perintah as DasarPerintah[]).map((d, i) => {
-                      let teks = d.perihal;
-                      if (d.jenis === 'surat' && d.nomor) {
-                        teks = `${d.nomor} tanggal ${fmtDate(d.tanggal ?? '')} tentang ${d.perihal}`;
-                      } else if (d.jenis === 'lisan') {
-                        teks = `Perintah Lisan: ${d.perihal}`;
-                      }
-                      return (
-                        <li key={i} style={{ marginBottom: '2px' }}>{teks}</li>
-                      );
-                    })}
-                  </ol>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <tbody>
+                      {(data.dasar_perintah as DasarPerintah[]).map((d, i) => {
+                        let teks = d.perihal;
+                        if (d.jenis === 'surat' && d.nomor) {
+                          teks = `${d.perihal} Nomor : ${d.nomor} tanggal ${fmtDate(d.tanggal ?? '')}`;
+                        } else if (d.jenis === 'lisan') {
+                          teks = `Perintah Lisan: ${d.perihal}`;
+                        }
+                        return (
+                          <tr key={i}>
+                            <td style={{ width: '22px', verticalAlign: 'top', paddingBottom: '3px' }}>{i + 1}.</td>
+                            <td style={{ verticalAlign: 'top', paddingBottom: '3px' }}>{teks}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 ) : (
                   <span>{String(data.dasar_perintah ?? '—')}</span>
                 )}
@@ -151,8 +244,8 @@ const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
         </table>
 
         {/* Memerintahkan */}
-        <div style={{ textAlign: 'center', margin: '16px 0 12px' }}>
-          <strong style={{ fontSize: '12pt', textDecoration: 'underline', letterSpacing: '2px' }}>M E M E R I N T A H K A N :</strong>
+        <div style={{ textAlign: 'center', margin: '8px 0 6px' }}>
+          <strong style={{ fontSize: '11pt', textDecoration: 'underline', letterSpacing: '1.2px' }}>M E M E R I N T A H K A N :</strong>
         </div>
 
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -161,17 +254,23 @@ const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
               <td style={{ width: '90px', verticalAlign: 'top' }}>Kepada :</td>
               <td>
                 {pegawaiList.map((pl, idx) => (
-                  <div key={pl.id} style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-                    <span style={{ width: '24px', flexShrink: 0 }}>{idx + 1}.</span>
-                    <table style={{ borderCollapse: 'collapse', fontSize: '12pt' }}>
-                      <tbody>
-                        <tr><td style={{ width: '75px', padding: '1px 0' }}>Nama</td><td style={{ padding: '1px 4px' }}>:</td><td style={{ padding: '1px 0', fontWeight: 'bold' }}>{formatNamaLengkap(pl.pegawai)}</td></tr>
-                        <tr><td style={{ padding: '1px 0' }}>NIP</td><td style={{ padding: '1px 4px' }}>:</td><td style={{ padding: '1px 0', fontFamily: 'monospace', fontSize: '11pt' }}>{pl.pegawai?.nip}</td></tr>
-                        <tr><td style={{ padding: '1px 0' }}>Pangkat</td><td style={{ padding: '1px 4px' }}>:</td><td style={{ padding: '1px 0' }}>{pl.pegawai?.ref_pangkat?.nama}{pl.pegawai?.ref_golongan ? ` / ${pl.pegawai.ref_golongan.nama}` : ''}</td></tr>
-                        <tr><td style={{ padding: '1px 0' }}>Jabatan</td><td style={{ padding: '1px 4px' }}>:</td><td style={{ padding: '1px 0' }}>{pl.pegawai?.jabatan}</td></tr>
-                      </tbody>
-                    </table>
-                  </div>
+                  <table key={pl.id} style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '10px' }}>
+                    <tbody>
+                      <tr>
+                        <td style={{ width: '24px', verticalAlign: 'top' }}>{idx + 1}.</td>
+                        <td>
+                          <table style={{ borderCollapse: 'collapse', fontSize: '12pt' }}>
+                            <tbody>
+                              <tr><td style={{ width: '75px', padding: '0 0' }}>Nama</td><td style={{ padding: '0 4px' }}>:</td><td style={{ padding: '0 0', fontWeight: 'bold' }}>{formatNamaLengkap(pl.pegawai)}</td></tr>
+                              <tr><td style={{ padding: '0 0' }}>NIP</td><td style={{ padding: '0 4px' }}>:</td><td style={{ padding: '0 0', fontFamily: 'monospace', fontSize: '10.5pt' }}>{pl.pegawai?.nip}</td></tr>
+                              <tr><td style={{ padding: '0 0' }}>Pangkat</td><td style={{ padding: '0 4px' }}>:</td><td style={{ padding: '0 0' }}>{pl.pegawai?.ref_pangkat?.nama}{pl.pegawai?.ref_golongan ? ` / ${pl.pegawai.ref_golongan.nama}` : ''}</td></tr>
+                              <tr><td style={{ padding: '0 0' }}>Jabatan</td><td style={{ padding: '0 4px' }}>:</td><td style={{ padding: '0 0' }}>{pl.pegawai?.jabatan}</td></tr>
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 ))}
               </td>
             </tr>
@@ -179,15 +278,26 @@ const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
             <tr>
               <td style={{ verticalAlign: 'top' }}>Untuk :</td>
               <td>
-                <ol style={{ margin: 0, paddingLeft: '18px', lineHeight: 1.6 }}>
-                  {(data.tujuan_kegiatan ?? []).map((t, i) => <li key={i}>{t}</li>)}
-                </ol>
+                {(data.tujuan_kegiatan ?? []).length > 1 ? (
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <tbody>
+                      {(data.tujuan_kegiatan ?? []).map((t, i) => (
+                        <tr key={i}>
+                          <td style={{ width: '22px', verticalAlign: 'top', paddingBottom: '2px' }}>{i + 1}.</td>
+                          <td style={{ verticalAlign: 'top', paddingBottom: '2px' }}>{t}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <span>{(data.tujuan_kegiatan ?? [])[0] || '—'}</span>
+                )}
               </td>
             </tr>
             {data.lama_kegiatan && (
               <tr>
                 <td style={{ verticalAlign: 'top', paddingTop: '6px' }}>Selama :</td>
-                <td style={{ paddingTop: '6px' }}>{data.lama_kegiatan} (hari) hari</td>
+                <td style={{ paddingTop: '5px' }}>{data.lama_kegiatan} (hari)</td>
               </tr>
             )}
             {data.pembebanan_anggaran && (
@@ -503,11 +613,8 @@ const DocumentRenderer: React.FC = () => {
             .select(`
               *,
               instansi:instansi_id(*),
-              penandatangan:penandatangan_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*)),
-              spt_pegawai:spt_pegawai(
-                *,
-                pegawai:pegawai_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*))
-              ),
+              penandatangan:penandatangan_id(*, ref_pangkat(*), ref_golongan(*)),
+              spt_pegawai(*, pegawai(*, ref_pangkat(*), ref_golongan(*))),
               mata_anggaran:mata_anggaran_id(*)
             `)
             .eq('id', id!)
