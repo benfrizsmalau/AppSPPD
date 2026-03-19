@@ -270,7 +270,7 @@ const Dashboard: React.FC = () => {
       if (!tenantId) return [];
       const [sptRes, sppdRes] = await Promise.all([
         supabase.from('spt').select('id, created_at, status, nomor_spt, tujuan_kegiatan').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(5),
-        supabase.from('sppd').select('id, created_at, status, nomor_sppd, maksud_perjalanan, tujuan_kegiatan').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(5)
+        supabase.from('sppd').select('id, created_at, status, nomor_sppd, maksud_perjalanan').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(5)
       ]);
       const spt = (sptRes.data || []).map(s => ({
         id: s.id,
@@ -287,7 +287,7 @@ const Dashboard: React.FC = () => {
         status: s.status,
         type: 'SPPD',
         nomor: s.nomor_sppd ?? `DRAFT-SPPD-${s.id}`,
-        deskripsi: s.maksud_perjalanan || (Array.isArray(s.tujuan_kegiatan) ? s.tujuan_kegiatan[0] : ''),
+        deskripsi: s.maksud_perjalanan || '',
         href: `/sppd/${s.id}`
       }));
       return [...spt, ...sppd].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 10);
@@ -503,7 +503,7 @@ const Dashboard: React.FC = () => {
                         </span>
                       </td>
                       <td className="font-mono text-xs font-bold text-slate-700">{doc.nomor}</td>
-                      <td className="max-w-xs"><span className="truncate block text-slate-500">{doc.maksud_perjalanan || doc.tujuan_kegiatan?.[0] || '—'}</span></td>
+                      <td className="max-w-xs"><span className="truncate block text-slate-500">{doc.deskripsi || '—'}</span></td>
                       <td className="text-xs text-slate-400">{format(new Date(doc.created_at), 'dd MMM yyyy')}</td>
                       <td className="pr-6"><StatusBadge status={doc.status} /></td>
                     </tr>
