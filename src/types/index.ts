@@ -91,6 +91,7 @@ export interface Instansi {
   nama_singkat: string;
   logo_path?: string;
   logo_kabupaten_path?: string;
+  logo_garuda_path?: string;       // Logo Garuda untuk Kop Bupati
   alamat: string;
   kabupaten_kota: string;
   ibu_kota?: string;

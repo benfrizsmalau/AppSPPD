@@ -218,7 +218,7 @@ const PenandatanganModal: React.FC<PenandatanganModalProps> = ({ isOpen, onClose
         gelar_depan: data.gelar_depan ?? '',
         nama_lengkap: data.nama_lengkap,
         gelar_belakang: data.gelar_belakang ?? '',
-        nip: data.nip, jabatan: data.jabatan,
+        nip: data.nip ?? '', jabatan: data.jabatan,
         pangkat_id: data.pangkat_id ?? '', golongan_id: data.golongan_id ?? '',
         unit_kerja_id: data.unit_kerja_id ?? '',
         jenis_dokumen: data.jenis_dokumen ?? [],
@@ -245,14 +245,14 @@ const PenandatanganModal: React.FC<PenandatanganModalProps> = ({ isOpen, onClose
       toast.error('Nama, NIP, dan Jabatan wajib diisi.');
       return;
     }
-    if (form.nip.length !== 18) { toast.error('NIP harus 18 digit.'); return; }
+    if (form.nip && form.nip.length !== 18) { toast.error('NIP harus 18 digit (atau kosongkan untuk pejabat politik).'); return; }
     setSaving(true);
     try {
       const payload: Partial<Penandatangan> = {
         gelar_depan: form.gelar_depan || undefined,
         nama_lengkap: form.nama_lengkap.trim(),
         gelar_belakang: form.gelar_belakang || undefined,
-        nip: form.nip,
+        nip: form.nip || undefined,   // opsional — Bupati tidak punya NIP
         jabatan: form.jabatan.trim(),
         pangkat_id: form.pangkat_id || undefined,
         golongan_id: form.golongan_id || undefined,
@@ -295,9 +295,15 @@ const PenandatanganModal: React.FC<PenandatanganModalProps> = ({ isOpen, onClose
               <p className="text-[10px] text-slate-400 mt-1">Gelar belakang akan otomatis dipisahkan dengan tanda koma.</p>
             </div>
             <div className="form-group">
-              <label className="form-label">NIP <span className="required-mark">*</span></label>
-              <input className="form-input font-mono" maxLength={18} value={form.nip} onChange={e => setForm(f => ({ ...f, nip: e.target.value.replace(/\D/g, '') }))} placeholder="18 digit NIP" />
-              <span className="form-hint">{form.nip.length}/18 karakter</span>
+              <label className="form-label">NIP
+                <span className="ml-1 text-[10px] font-normal text-slate-400">(kosongkan jika Bupati/pejabat politik)</span>
+              </label>
+              <input className="form-input font-mono" maxLength={18} value={form.nip} onChange={e => setForm(f => ({ ...f, nip: e.target.value.replace(/\D/g, '') }))} placeholder="18 digit NIP PNS" />
+              {form.nip.length > 0 && (
+                <span className={`form-hint ${form.nip.length === 18 ? 'text-emerald-600' : 'text-amber-500'}`}>
+                  {form.nip.length}/18 karakter
+                </span>
+              )}
             </div>
             <div className="form-group">
               <label className="form-label">Jabatan <span className="required-mark">*</span></label>
@@ -536,7 +542,7 @@ const Settings: React.FC = () => {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const uploadLogo = useCallback(async (field: 'logo_path' | 'logo_kabupaten_path', file: File): Promise<string | null> => {
+  const uploadLogo = useCallback(async (field: 'logo_path' | 'logo_kabupaten_path' | 'logo_garuda_path', file: File): Promise<string | null> => {
     const ext = file.name.split('.').pop();
     const path = `${tenantId}/${field}_${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('logos').upload(path, file, { upsert: true });
@@ -878,6 +884,38 @@ const Settings: React.FC = () => {
                   </div>
                   <div className="card-body space-y-4">
                     <p className="text-xs text-slate-500">Digunakan saat SPT ditetapkan langsung oleh Bupati/Walikota. Jika dikosongkan, sistem akan menggunakan format default dari nama kabupaten/kota.</p>
+
+                    {/* Logo Garuda */}
+                    <div className="form-group">
+                      <label className="form-label text-xs">Logo Garuda / Lambang Negara</label>
+                      <p className="form-hint mb-2">Tampil di sisi kiri Kop Bupati. Jika tidak diunggah, sistem menggunakan Logo Kabupaten sebagai fallback.</p>
+                      <div className="flex items-center gap-4">
+                        <div className="w-20 h-20 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center bg-slate-50 flex-shrink-0">
+                          {instansiForm.logo_garuda_path
+                            ? <img src={instansiForm.logo_garuda_path} alt="Garuda" className="h-16 w-auto object-contain" />
+                            : <span className="text-[10px] text-slate-400 text-center px-1">Belum ada</span>
+                          }
+                        </div>
+                        <div className="flex-1">
+                          <LogoUpload
+                            label="Logo Garuda (PNG transparan)"
+                            currentUrl={instansiForm.logo_garuda_path}
+                            onUpload={f => uploadLogo('logo_garuda_path', f)}
+                            previewSize={56}
+                          />
+                          {instansiForm.logo_garuda_path && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm text-rose-500 mt-1 text-xs"
+                              onClick={() => setInstansiForm(f => ({ ...f, logo_garuda_path: undefined }))}
+                            >
+                              <X size={12} /> Hapus Garuda
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="form-group">
                       <label className="form-label text-xs">Jabatan Kepala Daerah</label>
                       <input

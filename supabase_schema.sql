@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS instansi (
   nama_singkat VARCHAR(50) NOT NULL,
   logo_path TEXT,
   logo_kabupaten_path TEXT,
+  logo_garuda_path TEXT,              -- Logo Garuda/Lambang Negara untuk Kop Bupati
   alamat TEXT NOT NULL,
   kabupaten_kota VARCHAR(100) NOT NULL,
   ibu_kota VARCHAR(100),
@@ -249,7 +250,7 @@ CREATE TABLE IF NOT EXISTS penandatangan (
   nama_lengkap VARCHAR(100) NOT NULL,
   gelar_depan VARCHAR(20),
   gelar_belakang VARCHAR(30),
-  nip VARCHAR(18) NOT NULL,
+  nip VARCHAR(18),                    -- opsional: Bupati/pejabat politik tidak punya NIP
   jabatan VARCHAR(150) NOT NULL,
   pangkat_id INT REFERENCES ref_pangkat(id),
   golongan_id INT REFERENCES ref_golongan(id),
@@ -1003,6 +1004,13 @@ INSERT INTO ref_alat_angkut (tenant_id, nama, is_global) VALUES
 (NULL, 'Kendaraan Pribadi', TRUE),
 (NULL, 'Lainnya', TRUE)
 ON CONFLICT DO NOTHING;
+
+-- =================================================================
+-- MIGRATION: Logo Garuda & NIP opsional untuk Penandatangan Bupati
+-- Jalankan di Supabase SQL Editor jika database sudah berjalan
+-- =================================================================
+-- ALTER TABLE instansi ADD COLUMN IF NOT EXISTS logo_garuda_path TEXT;
+-- ALTER TABLE penandatangan ALTER COLUMN nip DROP NOT NULL;
 
 -- =================================================================
 -- MIGRATION: Kop Surat Hierarki (tambahkan ke database yang sudah ada)

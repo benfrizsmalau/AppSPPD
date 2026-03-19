@@ -496,7 +496,7 @@ const Dashboard: React.FC = () => {
                   <tr><td colSpan={5} className="text-center py-20 text-slate-400 font-medium">Buka menu SPPD untuk membuat dokumen baru.</td></tr>
                 ) : (
                   recentDocs.map((doc: any) => (
-                    <tr key={doc.id} className="cursor-pointer group hover:bg-white" onClick={() => navigate(doc.href)}>
+                    <tr key={`${doc.type}-${doc.id}`} className="cursor-pointer group hover:bg-white" onClick={() => navigate(doc.href)}>
                       <td className="pl-6">
                         <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase ${doc.type === 'SPT' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'}`}>
                           {doc.type}

@@ -7,7 +7,7 @@ export interface Penandatangan {
   nama_lengkap: string;
   gelar_depan?: string;
   gelar_belakang?: string;
-  nip: string;
+  nip?: string;                 // opsional — Bupati/pejabat politik tidak punya NIP
   jabatan: string;
   pangkat_id?: number;
   golongan_id?: number;

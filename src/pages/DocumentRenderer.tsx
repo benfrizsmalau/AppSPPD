@@ -68,17 +68,22 @@ const KopSKPD: React.FC<{ instansi: Instansi | null | undefined }> = ({ instansi
   </div>
 );
 
-/** Kop Bupati/Walikota — Logo Kabupaten center, nama jabatan kepala daerah */
+/** Kop Bupati/Walikota
+ *  Kiri : Logo Garuda (jika ada) atau Logo Kabupaten sebagai fallback
+ *  Tengah: Jabatan Kepala Daerah (nama besar) + alamat/telepon
+ *  Kanan : kosong (spacer simetris) */
 const KopBupati: React.FC<{ instansi: Instansi | null | undefined }> = ({ instansi }) => {
   const jabatan = instansi?.jabatan_kepala_daerah
     ?? (instansi?.kabupaten_kota ? `BUPATI ${instansi.kabupaten_kota.toUpperCase()}` : 'BUPATI');
   const alamat = instansi?.alamat_bupati ?? instansi?.alamat;
   const telepon = instansi?.telepon_bupati ?? instansi?.telepon;
+  // Garuda → logo kabupaten sebagai fallback
+  const logoKiri = instansi?.logo_garuda_path ?? instansi?.logo_kabupaten_path;
   return (
     <div style={{ display: 'flex', alignItems: 'stretch', borderBottom, paddingBottom: '4px', marginBottom: '8px' }}>
       <div style={{ width: '85px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {instansi?.logo_kabupaten_path && (
-          <img src={instansi.logo_kabupaten_path} alt="Logo Kab" style={{ width: '75px', height: 'auto', objectFit: 'contain' }} />
+        {logoKiri && (
+          <img src={logoKiri} alt="Logo" style={{ width: '75px', height: 'auto', objectFit: 'contain' }} />
         )}
       </div>
       <div style={{ flex: 1, textAlign: 'center', padding: '0 8px', ...kopFont }}>
@@ -90,7 +95,7 @@ const KopBupati: React.FC<{ instansi: Instansi | null | undefined }> = ({ instan
           <p style={{ margin: 0, fontSize: '8pt', color: '#444' }}>Telp. {telepon}</p>
         )}
       </div>
-      <div style={{ width: '85px' }} /> {/* spacer agar center seimbang */}
+      <div style={{ width: '85px' }} /> {/* spacer agar teks center seimbang */}
     </div>
   );
 };
@@ -171,7 +176,9 @@ const SignatureBlock: React.FC<SignatureBlockProps> = ({ label, place, date, pen
           {penandatangan.ref_golongan?.nama ? ` / ${penandatangan.ref_golongan.nama}` : ''}
         </p>
       )}
-      <p style={{ margin: 0, fontSize: '10.5pt' }}>NIP. {penandatangan?.nip ?? ''}</p>
+      {penandatangan?.nip && (
+        <p style={{ margin: 0, fontSize: '10.5pt' }}>NIP. {penandatangan.nip}</p>
+      )}
     </div>
   </div>
 );
@@ -495,8 +502,8 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
                   <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
                   <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>
                     <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
-                    {(data.penandatangan as any)?.ref_pangkat?.nama}<br />
-                    NIP. {data.penandatangan?.nip}
+                    {(data.penandatangan as any)?.ref_pangkat?.nama}
+                    {data.penandatangan?.nip ? <><br />NIP. {data.penandatangan.nip}</> : null}
                   </td></tr>
                 </tbody>
               </table>
@@ -569,8 +576,8 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
                   <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
                   <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>
                     <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
-                    {(data.penandatangan as any)?.ref_pangkat?.nama}<br />
-                    NIP. {data.penandatangan?.nip}
+                    {(data.penandatangan as any)?.ref_pangkat?.nama}
+                    {data.penandatangan?.nip ? <><br />NIP. {data.penandatangan.nip}</> : null}
                   </td></tr>
                 </tbody>
               </table>
@@ -580,9 +587,11 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
               <div style={{ marginTop: '16px', textAlign: 'center' }}>
                 <p style={{ fontWeight: 'bold' }}>{data.penandatangan?.jabatan ?? 'Pejabat Pembuat Komitmen'}:</p>
                 <div style={{ height: '70px' }} />
-                <p><strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
-                {(data.penandatangan as any)?.ref_pangkat?.nama}<br />
-                NIP. {data.penandatangan?.nip}</p>
+                <p>
+                  <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
+                  {(data.penandatangan as any)?.ref_pangkat?.nama}
+                  {data.penandatangan?.nip ? <><br />NIP. {data.penandatangan.nip}</> : null}
+                </p>
               </div>
             </td>
           </tr>
