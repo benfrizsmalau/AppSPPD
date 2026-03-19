@@ -175,7 +175,7 @@ export default function ProfilPengguna() {
 
   useEffect(() => {
     if (profile) {
-      const saved = (profile as { preferences?: Record<string, unknown> }).preferences || {};
+      const saved = profile.preferences || {};
       setPrefs(prev => ({
         notif_approval: (saved.notif_approval as boolean) ?? prev.notif_approval,
         notif_print: (saved.notif_print as boolean) ?? prev.notif_print,
@@ -191,7 +191,7 @@ export default function ProfilPengguna() {
     defaultValues: {
       nama_lengkap: profile?.nama_lengkap || '',
       username: profile?.username || '',
-      telepon: (profile as { telepon?: string })?.telepon || '',
+      telepon: profile?.telepon || '',
     },
   });
 

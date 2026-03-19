@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   last_active TIMESTAMP WITH TIME ZONE,
   login_count INT DEFAULT 0,
   avatar_url TEXT,
+  telepon VARCHAR(20),
+  preferences JSONB DEFAULT '{}',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -1015,3 +1017,19 @@ ON CONFLICT DO NOTHING;
 --   CHECK (kop_surat IN ('skpd','bupati','sekda'));
 -- ALTER TABLE sppd ADD COLUMN IF NOT EXISTS kop_surat TEXT NOT NULL DEFAULT 'skpd'
 --   CHECK (kop_surat IN ('skpd','bupati','sekda'));
+
+-- =================================================================
+-- MIGRATION: Profil Pengguna — kolom telepon & preferences
+-- Jalankan di Supabase SQL Editor jika database sudah berjalan
+-- =================================================================
+-- ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS telepon VARCHAR(20);
+-- ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS preferences JSONB DEFAULT '{}';
+
+-- =================================================================
+-- MIGRATION: Storage bucket untuk avatar pengguna
+-- Jalankan di Supabase SQL Editor (bagian Storage → New Bucket)
+-- ATAU via SQL berikut (membutuhkan service_role key):
+-- =================================================================
+-- INSERT INTO storage.buckets (id, name, public)
+-- VALUES ('avatars', 'avatars', true)
+-- ON CONFLICT (id) DO NOTHING;

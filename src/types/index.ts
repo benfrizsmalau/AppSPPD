@@ -43,6 +43,8 @@ export interface UserProfile {
   last_active?: string;
   login_count: number;
   avatar_url?: string;
+  telepon?: string;
+  preferences?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   tenant?: Tenant;
