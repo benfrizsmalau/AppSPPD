@@ -143,27 +143,8 @@ export interface Pegawai {
   instansi?: Instansi;
 }
 
-export interface Penandatangan {
-  id: number;
-  tenant_id: string;
-  nama_lengkap: string;
-  gelar_depan?: string;
-  gelar_belakang?: string;
-  nip: string;
-  jabatan: string;
-  pangkat_id?: number;
-  golongan_id?: number;
-  unit_kerja_id?: number;
-  jenis_dokumen?: string[];
-  ttd_digital_path?: string;
-  status_aktif: boolean;
-  periode_mulai?: string;
-  periode_selesai?: string;
-  created_at: string;
-  updated_at: string;
-  ref_pangkat?: RefPangkat;
-  ref_golongan?: RefGolongan;
-}
+// Penandatangan — defined in types/penandatangan.ts, re-exported via export * below
+// Do not define a duplicate here.
 
 export interface SettingPenomoran {
   id: number;
@@ -191,39 +172,6 @@ export interface DasarPerintah {
   perihal: string;           // wajib untuk semua jenis (deskripsi/perihal/keterangan)
 }
 
-export interface SPT {
-  id: number;
-  tenant_id: string;
-  nomor_spt?: string;
-  tanggal_penetapan: string;
-  tempat_penetapan: string;
-  dasar_perintah: DasarPerintah[];
-  tujuan_kegiatan: string[];
-  lama_kegiatan: string;
-  pembebanan_anggaran?: string;
-  mata_anggaran_id?: number;
-  penandatangan_id?: number;
-  instansi_id?: number;
-  kop_surat: 'skpd' | 'bupati' | 'sekda';
-  status: DocumentStatus;
-  pdf_file_path?: string;
-  catatan?: string;
-  alasan_pembatalan?: string;
-  parent_spt_id?: number;
-  print_count: number;
-  last_printed_at?: string;
-  cancelled_at?: string;
-  finalized_at?: string;
-  finalized_by?: string;
-  created_at: string;
-  updated_at: string;
-  created_by?: string;
-  penandatangan?: Penandatangan;
-  instansi?: Instansi;
-  spt_pegawai?: SPTPegawai[];
-  mata_anggaran?: MataAnggaran;
-}
-
 export interface SPTPegawai {
   id: number;
   spt_id: number;
@@ -245,47 +193,6 @@ export interface SPTFormValues {
   instansi_id?: number;
   catatan?: string;
   pegawai_ids: number[];
-}
-
-export interface SPPD {
-  id: number;
-  tenant_id: string;
-  nomor_sppd?: string;
-  spt_id?: number;
-  pejabat_pemberi_perintah_id?: number;
-  pegawai_id: number;
-  tingkat_perjalanan?: string;
-  maksud_perjalanan: string;
-  alat_angkut?: string;
-  tempat_berangkat: string;
-  tempat_tujuan: string;
-  lama_perjalanan: number;
-  tanggal_berangkat: string;
-  tanggal_kembali: string;
-  instansi_id?: number;
-  mata_anggaran_id?: number;
-  mata_anggaran?: string | MataAnggaran;
-  keterangan_lain?: string;
-  tempat_penerbitan?: string;
-  tanggal_penerbitan: string;
-  penandatangan_id?: number;
-  status: DocumentStatus;
-  pdf_file_path?: string;
-  print_count: number;
-  last_printed_at?: string;
-  alasan_pembatalan?: string;
-  cancelled_at?: string;
-  completed_at?: string;
-  finalized_at?: string;
-  parent_sppd_id?: number;
-  created_at: string;
-  updated_at: string;
-  created_by?: string;
-  pegawai?: Pegawai;
-  penandatangan?: Penandatangan;
-  instansi?: Instansi;
-  spt?: SPT;
-  sppd_pengikut?: SPPDPengikut[];
 }
 
 export interface SPPDPengikut {
@@ -363,6 +270,7 @@ export interface Notifikasi {
   pesan: string;
   dokumen_id?: number;
   jenis_dokumen?: string;
+  status: 'Draft' | 'Sent' | 'Read';
   is_read: boolean;
   created_at: string;
 }
@@ -432,6 +340,8 @@ export interface AlertInfo {
   action?: { label: string; href: string };
 }
 
+// Re-export specific document types to avoid circular issues
+// but we remove the definitions from here to avoid duplication
 export * from './spt';
 export * from './sppd';
 export * from './penandatangan';

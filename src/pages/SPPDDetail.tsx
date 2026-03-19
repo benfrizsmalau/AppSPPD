@@ -25,6 +25,7 @@ import {
   Plane,
   Link2,
   BadgeCheck,
+  Plus,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -44,7 +45,7 @@ import { toast } from 'sonner';
 import type { SPPD, SPPDPengikut, SPPDRealisasi, ApprovalLog, DocumentStatus } from '../types';
 
 // ─── Local extended types for joined data ─────────────────────────
-interface SPPDDetail extends Omit<SPPD, 'sppd_pengikut' | 'pegawai' | 'instansi' | 'penandatangan' | 'spt'> {
+interface SPPDDetail extends Omit<SPPD, 'sppd_pengikut' | 'sppd_realisasi' | 'pegawai' | 'instansi' | 'penandatangan' | 'spt' | 'mata_anggaran_rel'> {
   spt?: {
     id: number;
     nomor_spt?: string;
@@ -179,11 +180,23 @@ export default function SPPDDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { tenantId } = useAuth();
+  const { tenantId, hasRole } = useAuth();
 
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [komentar, setKomentar] = useState('');
   const [alasan, setAlasan] = useState('');
+  const [showRealisasiModal, setShowRealisasiModal] = useState(false);
+  const [selectedSection, setSelectedSection] = useState<number | null>(null);
+  const [realisasiForm, setRealisasiForm] = useState({
+    tanggal: '',
+    lokasi: '',
+    nama_pejabat: '',
+    jabatan_pejabat: '',
+    catatan: '',
+  });
 
   // ── Data Fetching ──────────────────────────────────────────────
   const {
@@ -195,9 +208,16 @@ export default function SPPDDetail() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('sppd')
-        .select(
-          '*, spt(*), pegawai(*, ref_pangkat(*), ref_golongan(*), instansi(*)), instansi(*), penandatangan:penandatangan_id(*), sppd_pengikut(*), sppd_realisasi(*), mata_anggaran_rel:mata_anggaran_id(*)'
-        )
+        .select(`
+          *,
+          spt:spt_id(*),
+          pegawai:pegawai_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*), unit_kerja:unit_kerja_id(*)),
+          instansi:instansi_id(*),
+          penandatangan:penandatangan_id(*),
+          sppd_pengikut(*),
+          sppd_realisasi(*),
+          mata_anggaran:mata_anggaran_id(*)
+        `)
         .eq('id', id!)
         .single();
       if (error) throw error;
@@ -224,6 +244,87 @@ export default function SPPDDetail() {
   });
 
   // ── Mutations ──────────────────────────────────────────────────
+  const approveMutation = useMutation({
+    mutationFn: async () => {
+      if (!tenantId || !sppd) throw new Error('Data tidak lengkap');
+
+      // 1. Get next number if not currently numbered
+      let nomor = sppd.nomor_sppd;
+      if (!nomor) {
+        const { data: nextNo, error: noErr } = await supabase.rpc(
+          'get_next_document_number',
+          { p_tenant_id: tenantId, p_jenis: 'SPPD' }
+        );
+        if (noErr) throw noErr;
+        nomor = nextNo as string;
+      }
+
+      // 2. Update SPPD Status
+      const { error: updateErr } = await supabase
+        .from('sppd')
+        .update({
+          status: 'Final' as DocumentStatus,
+          nomor_sppd: nomor,
+          finalized_at: new Date().toISOString(),
+        })
+        .eq('id', id!);
+      if (updateErr) throw updateErr;
+
+      // 3. Log to approval_log
+      const { error: logErr } = await supabase.from('approval_log').insert({
+        tenant_id: tenantId,
+        dokumen_id: Number(id),
+        jenis_dokumen: 'SPPD',
+        level: 1,
+        approver_id: (await supabase.auth.getUser()).data.user?.id,
+        action: 'APPROVE',
+        komentar: komentar || 'Disetujui melalui sistem.',
+      });
+      if (logErr) throw logErr;
+    },
+    onSuccess: () => {
+      toast.success('SPPD Berhasil Disetujui & Difinalisasi');
+      queryClient.invalidateQueries({ queryKey: ['sppd'] });
+      queryClient.invalidateQueries({ queryKey: ['approval_log'] });
+      setShowApproveModal(false);
+      setKomentar('');
+    },
+    onError: (err: any) => toast.error('Gagal menyetujui: ' + err.message),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async () => {
+      if (!tenantId) throw new Error('Tenant tidak ditemukan');
+
+      // 1. Update SPPD Status back to Draft
+      const { error: updateErr } = await supabase
+        .from('sppd')
+        .update({ status: 'Draft' as DocumentStatus })
+        .eq('id', id!);
+      if (updateErr) throw updateErr;
+
+      // 2. Log to approval_log
+      const { error: logErr } = await supabase.from('approval_log').insert({
+        tenant_id: tenantId,
+        dokumen_id: Number(id),
+        jenis_dokumen: 'SPPD',
+        level: 1,
+        approver_id: (await supabase.auth.getUser()).data.user?.id,
+        action: 'REJECT',
+        komentar: komentar || 'Ditolak/revisi oleh Pejabat.',
+      });
+      if (logErr) throw logErr;
+    },
+    onSuccess: () => {
+      toast.info('SPPD Ditolak (Kembali ke Draft)');
+      queryClient.invalidateQueries({ queryKey: ['sppd'] });
+      queryClient.invalidateQueries({ queryKey: ['approval_log'] });
+      setShowRejectModal(false);
+      setKomentar('');
+    },
+    onError: (err: any) => toast.error('Gagal memproses penolakan: ' + err.message),
+  });
+
   const finalizeMutation = useMutation({
     mutationFn: async () => {
       if (!tenantId) throw new Error('Tenant tidak ditemukan');
@@ -289,6 +390,32 @@ export default function SPPDDetail() {
       setShowCompleteModal(false);
     },
     onError: () => toast.error('Gagal menandai SPPD selesai'),
+  });
+  
+  const saveRealisasiMutation = useMutation({
+    mutationFn: async () => {
+      if (!id || selectedSection === null) return;
+      const payload = {
+        sppd_id: Number(id),
+        section: selectedSection,
+        tanggal: realisasiForm.tanggal || null,
+        lokasi: realisasiForm.lokasi || null,
+        nama_pejabat: realisasiForm.nama_pejabat || null,
+        jabatan_pejabat: realisasiForm.jabatan_pejabat || null,
+        catatan: realisasiForm.catatan || null,
+      };
+
+      const { error } = await supabase
+        .from('sppd_realisasi')
+        .upsert(payload, { onConflict: 'sppd_id, section' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success('Data realisasi berhasil disimpan');
+      queryClient.invalidateQueries({ queryKey: ['sppd', id] });
+      setShowRealisasiModal(false);
+    },
+    onError: (err: any) => toast.error('Gagal menyimpan realisasi: ' + err.message),
   });
 
   const cloneRevisionMutation = useMutation({
@@ -375,8 +502,20 @@ export default function SPPDDetail() {
   }
 
   const sortedPengikut = [...(sppd.sppd_pengikut ?? [])].sort((a, b) => a.urutan - b.urutan);
-  const sortedRealisasi = [...(sppd.sppd_realisasi ?? [])].sort((a, b) => a.section - b.section);
-  const isCompleted = sppd.status === 'Completed';
+  const isFinalOrPrinted = ['Final', 'Printed', 'Completed'].includes(sppd.status);
+
+  const handleOpenRealisasi = (sectionNum: number) => {
+    const existing = sppd.sppd_realisasi?.find(r => r.section === sectionNum);
+    setSelectedSection(sectionNum);
+    setRealisasiForm({
+      tanggal: existing?.tanggal || '',
+      lokasi: existing?.lokasi || (sectionNum === 1 ? sppd.tempat_berangkat : sectionNum === 2 ? sppd.tempat_tujuan : ''),
+      nama_pejabat: existing?.nama_pejabat || '',
+      jabatan_pejabat: existing?.jabatan_pejabat || '',
+      catatan: existing?.catatan || '',
+    });
+    setShowRealisasiModal(true);
+  };
 
   // ── Main Render ────────────────────────────────────────────────
   return (
@@ -401,6 +540,23 @@ export default function SPPDDetail() {
 
         {/* ── Action Bar ──────────────────────────────────────── */}
         <div className="flex gap-2 flex-wrap items-start">
+          {sppd.status === 'Menunggu Persetujuan' && hasRole(['Admin', 'Pejabat']) && (
+            <div className="flex gap-2 p-1 bg-amber-50 rounded-2xl border border-amber-100 shadow-sm animate-in fade-in slide-in-from-top-2">
+              <button
+                className="btn btn-success btn-sm"
+                onClick={() => setShowApproveModal(true)}
+              >
+                <CheckCircle size={14} /> Setujui SPPD
+              </button>
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={() => setShowRejectModal(true)}
+              >
+                <RotateCcw size={14} /> Tolak/Revisi
+              </button>
+            </div>
+          )}
+
           {canEdit(sppd.status) && (
             <button
               className="btn btn-secondary btn-sm"
@@ -731,66 +887,71 @@ export default function SPPDDetail() {
           </div>
         )}
 
-        {/* ── Realisasi Section (Completed) ───────────────────── */}
-        {isCompleted && (
+        {/* ── Realisasi Section ────────────────────────────────── */}
+        {isFinalOrPrinted && (
           <div className="card card-hover lg:col-span-2">
-            <SectionHeader
-              icon={<CheckCircle size={15} />}
-              title="Realisasi Perjalanan"
-              count={sortedRealisasi.length}
-            />
+            <div className="card-header flex justify-between items-center">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
+                  <CheckCircle size={15} />
+                </div>
+                <h3 className="font-bold text-slate-800">Realisasi & Lembar Belakang</h3>
+              </div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Bagian I–IV</p>
+            </div>
             <div className="card-body">
-              {sortedRealisasi.length === 0 ? (
-                <div className="py-6 text-center">
-                  <p className="text-sm text-slate-400">Belum ada data realisasi tercatat</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {sortedRealisasi.map((r) => (
-                    <div key={r.id} className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold flex items-center justify-center">
-                          {r.section}
-                        </span>
-                        <p className="font-semibold text-slate-700 text-sm">
-                          {SECTION_LABELS[r.section] ?? `Bagian ${r.section}`}
-                        </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                {[1, 2, 3, 4].map((num) => {
+                  const data = sppd.sppd_realisasi?.find((r) => r.section === num);
+                  return (
+                    <div key={num} className={`group relative p-4 rounded-2xl border-2 transition-all ${data ? 'bg-white border-emerald-100 shadow-sm' : 'bg-slate-50 border-slate-100 hover:border-slate-200 dashed'}`}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-6 h-6 rounded-lg text-[10px] font-black flex items-center justify-center ${data ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                            {num === 1 ? 'I' : num === 2 ? 'II' : num === 3 ? 'III' : 'IV'}
+                          </span>
+                          <p className="font-bold text-slate-700 text-xs uppercase tracking-tight">
+                            {SECTION_LABELS[num]}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleOpenRealisasi(num)}
+                          className="w-7 h-7 rounded-lg bg-white shadow-sm border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-200 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <Edit size={12} />
+                        </button>
                       </div>
-                      <div className="space-y-2">
-                        {r.tanggal && (
-                          <div className="flex gap-2 text-xs">
-                            <span className="text-slate-400 w-20 flex-shrink-0">Tanggal</span>
-                            <span className="font-medium text-slate-700">{formatDateIndonesian(r.tanggal)}</span>
+
+                      {data ? (
+                        <div className="space-y-2">
+                          <div className="flex flex-col">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase">Waktu & Lokasi</span>
+                            <p className="text-xs font-semibold text-slate-700">
+                              {data.tanggal ? formatDateIndonesian(data.tanggal) : '—'} 
+                              <br />
+                              <span className="text-slate-500 font-normal">{data.lokasi || '—'}</span>
+                            </p>
                           </div>
-                        )}
-                        {r.lokasi && (
-                          <div className="flex gap-2 text-xs">
-                            <span className="text-slate-400 w-20 flex-shrink-0">Lokasi</span>
-                            <span className="font-medium text-slate-700">{r.lokasi}</span>
-                          </div>
-                        )}
-                        {r.nama_pejabat && (
-                          <div className="flex gap-2 text-xs">
-                            <span className="text-slate-400 w-20 flex-shrink-0">Pejabat</span>
-                            <div>
-                              <p className="font-medium text-slate-700">{r.nama_pejabat}</p>
-                              {r.jabatan_pejabat && (
-                                <p className="text-slate-400">{r.jabatan_pejabat}</p>
-                              )}
+                          {data.nama_pejabat && (
+                            <div className="flex flex-col pt-1 border-t border-slate-50">
+                              <span className="text-[9px] font-bold text-slate-400 uppercase">Pengesah</span>
+                              <p className="text-[11px] font-bold text-slate-700 truncate">{data.nama_pejabat}</p>
+                              <p className="text-[10px] text-slate-500 truncate">{data.jabatan_pejabat}</p>
                             </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center py-4 cursor-pointer" onClick={() => handleOpenRealisasi(num)}>
+                          <div className="w-8 h-8 rounded-full bg-slate-200/50 flex items-center justify-center text-slate-400 mb-2">
+                            <Plus size={14} />
                           </div>
-                        )}
-                        {r.catatan && (
-                          <div className="flex gap-2 text-xs">
-                            <span className="text-slate-400 w-20 flex-shrink-0">Catatan</span>
-                            <span className="text-slate-700 italic">{r.catatan}</span>
-                          </div>
-                        )}
-                      </div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase">Isi Data</p>
+                        </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
@@ -955,6 +1116,178 @@ export default function SPPDDetail() {
                 onClick={() => cancelMutation.mutate()}
               >
                 {cancelMutation.isPending ? 'Memproses...' : 'Batalkan SPPD'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Realisasi Modal ────────────────────────────────────────── */}
+      {showRealisasiModal && (
+        <div className="modal-backdrop" onClick={() => setShowRealisasiModal(false)}>
+          <div className="modal-panel modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white text-[10px] font-black flex items-center justify-center">
+                  {selectedSection === 1 ? 'I' : selectedSection === 2 ? 'II' : selectedSection === 3 ? 'III' : 'IV'}
+                </span>
+                Edit Data Realisasi
+              </h2>
+              <button className="btn-icon btn-ghost" onClick={() => setShowRealisasiModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body space-y-4">
+              <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">
+                {SECTION_LABELS[selectedSection!] ?? ''}
+              </p>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="form-group">
+                  <label className="form-label">Tanggal</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={realisasiForm.tanggal}
+                    onChange={(e) => setRealisasiForm({ ...realisasiForm, tanggal: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Lokasi</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={realisasiForm.lokasi}
+                    onChange={(e) => setRealisasiForm({ ...realisasiForm, lokasi: e.target.value })}
+                    placeholder="Nama Kota/Tempat"
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Nama Pejabat (Lokasi)</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={realisasiForm.nama_pejabat}
+                  onChange={(e) => setRealisasiForm({ ...realisasiForm, nama_pejabat: e.target.value })}
+                  placeholder="Nama Lengkap Pejabat"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Jabatan</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={realisasiForm.jabatan_pejabat}
+                  onChange={(e) => setRealisasiForm({ ...realisasiForm, jabatan_pejabat: e.target.value })}
+                  placeholder="Contoh: Kepala Dinas / Kabag Umum"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Catatan</label>
+                <textarea
+                  className="form-textarea"
+                  value={realisasiForm.catatan}
+                  onChange={(e) => setRealisasiForm({ ...realisasiForm, catatan: e.target.value })}
+                  rows={2}
+                  placeholder="Tambahkan catatan jika diperlukan..."
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowRealisasiModal(false)}>
+                Batal
+              </button>
+              <button
+                className="btn btn-primary"
+                disabled={saveRealisasiMutation.isPending}
+                onClick={() => saveRealisasiMutation.mutate()}
+              >
+                {saveRealisasiMutation.isPending ? 'Menyimpan...' : 'Simpan Realisasi'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── Approve Modal ────────────────────────────────────────── */}
+      {showApproveModal && (
+        <div className="modal-backdrop" onClick={() => setShowApproveModal(false)}>
+          <div className="modal-panel modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title flex items-center gap-2">
+                <CheckCircle className="text-emerald-500" size={18} />
+                Setujui Dokumen
+              </h2>
+            </div>
+            <div className="modal-body space-y-4">
+              <p className="text-sm text-slate-600">
+                Persetujuan ini akan secara otomatis menerbitkan <strong>Nomor SPPD Resmi</strong> dan memfinalisasi dokumen.
+              </p>
+              <div className="form-group">
+                <label className="form-label text-xs">Catatan Opsional</label>
+                <textarea
+                  className="form-textarea"
+                  value={komentar}
+                  onChange={(e) => setKomentar(e.target.value)}
+                  placeholder="Contoh: Dokumen sesuai, silakan dilanjutkan."
+                  rows={2}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowApproveModal(false)}>
+                Batal
+              </button>
+              <button
+                className="btn btn-success"
+                disabled={approveMutation.isPending}
+                onClick={() => approveMutation.mutate()}
+              >
+                {approveMutation.isPending ? 'Memproses...' : 'Setujui & Terbitkan Nomor'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reject Modal ─────────────────────────────────────────── */}
+      {showRejectModal && (
+        <div className="modal-backdrop" onClick={() => setShowRejectModal(false)}>
+          <div className="modal-panel modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title flex items-center gap-2">
+                <RotateCcw className="text-rose-500" size={18} />
+                Tolak / Minta Revisi
+              </h2>
+            </div>
+            <div className="modal-body space-y-4">
+              <p className="text-sm text-slate-600">
+                Dokumen akan dikembalikan ke status <strong>Draft</strong> agar operator dapat melakukan perbaikan.
+              </p>
+              <div className="form-group">
+                <label className="form-label text-xs">Alasan Penolakan <span className="required-mark">*</span></label>
+                <textarea
+                  className="form-textarea"
+                  value={komentar}
+                  onChange={(e) => setKomentar(e.target.value)}
+                  placeholder="Jelaskan alasan penolakan atau bagian yang perlu direvisi..."
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowRejectModal(false)}>
+                Batal
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={!komentar.trim() || rejectMutation.isPending}
+                onClick={() => rejectMutation.mutate()}
+              >
+                {rejectMutation.isPending ? 'Memproses...' : 'Tolak & Kembalikan'}
               </button>
             </div>
           </div>

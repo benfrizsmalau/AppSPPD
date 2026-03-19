@@ -148,7 +148,7 @@ interface SignatureBlockProps {
   label?: string;
   place: string;
   date: string;
-  penandatangan: Penandatangan | null | undefined;
+  penandatangan: Penandatangan | undefined;
 }
 const SignatureBlock: React.FC<SignatureBlockProps> = ({ label, place, date, penandatangan }) => (
   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px', pageBreakBefore: 'avoid', pageBreakInside: 'avoid' }}>
@@ -395,7 +395,7 @@ const SPPDDocumentPage1: React.FC<{ data: SPPD }> = ({ data }) => {
               { num: '9.', label: (<>Pembebanan Anggaran<br />a. Instansi<br />b. Mata Anggaran</>), value: (
                 <><br />a. {data.instansi?.nama_lengkap ?? '—'}<br />b. {
                   typeof data.mata_anggaran === 'object' && data.mata_anggaran !== null
-                    ? `${data.mata_anggaran.kode} — ${data.mata_anggaran.nama}`
+                    ? `${(data.mata_anggaran as any).kode} — ${(data.mata_anggaran as any).nama}`
                     : (data.mata_anggaran || data.spt?.pembebanan_anggaran || '—')
                 }</>
               )},
@@ -495,7 +495,7 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
                   <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
                   <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>
                     <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
-                    {data.penandatangan?.ref_pangkat?.nama}<br />
+                    {(data.penandatangan as any)?.ref_pangkat?.nama}<br />
                     NIP. {data.penandatangan?.nip}
                   </td></tr>
                 </tbody>
@@ -569,7 +569,7 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
                   <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
                   <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>
                     <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
-                    {data.penandatangan?.ref_pangkat?.nama}<br />
+                    {(data.penandatangan as any)?.ref_pangkat?.nama}<br />
                     NIP. {data.penandatangan?.nip}
                   </td></tr>
                 </tbody>
@@ -581,7 +581,7 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
                 <p style={{ fontWeight: 'bold' }}>{data.penandatangan?.jabatan ?? 'Pejabat Pembuat Komitmen'}:</p>
                 <div style={{ height: '70px' }} />
                 <p><strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
-                {data.penandatangan?.ref_pangkat?.nama}<br />
+                {(data.penandatangan as any)?.ref_pangkat?.nama}<br />
                 NIP. {data.penandatangan?.nip}</p>
               </div>
             </td>

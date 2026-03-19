@@ -59,24 +59,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [user, resetInactivityTimers]);
 
-  const fetchProfile = async (userId: string) => {
+  const fetchProfile = async (userId: string, attempt = 1) => {
     try {
       const { data, error } = await supabase
         .from('user_profiles')
         .select('*, tenant:tenants(*)')
         .eq('id', userId)
         .single();
-      if (error) throw error;
+
+      if (error || !data) {
+        // Retry once after 1.5s — trigger may not have fired yet (race condition)
+        if (attempt < 3) {
+          await new Promise(res => setTimeout(res, 1500));
+          return fetchProfile(userId, attempt + 1);
+        }
+        throw error ?? new Error('Profile not found after retries');
+      }
+
       setProfile(data as UserProfile);
 
-      // Update last_active
+      // Update last_active (fire-and-forget)
       supabase
         .from('user_profiles')
         .update({ last_active: new Date().toISOString() })
         .eq('id', userId)
         .then(() => {});
     } catch (err) {
-      console.error('Error fetching profile:', err);
+      console.error('Error fetching profile (attempt', attempt, '):', err);
+      setProfile(null);
     } finally {
       setLoading(false);
     }
@@ -97,11 +107,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
+        
+        if (event === 'SIGNED_IN') {
+          // Log login event
+          supabase.from('login_events').insert({
+            user_id: session.user.id,
+            tenant_id: (session.user.user_metadata as any)?.tenant_id,
+            user_agent: navigator.userAgent,
+          }).then(() => {});
+        }
       } else {
         setProfile(null);
         setLoading(false);

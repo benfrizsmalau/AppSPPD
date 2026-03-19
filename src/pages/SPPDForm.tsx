@@ -187,7 +187,7 @@ const SPPDForm: React.FC = () => {
   });
 
   // ── Form setup ─────────────────────────────────────────────────────────────
-  const [defaultValues, setDefaultValues] = useState<Partial<FormValues>>({
+  const [defaultValues] = useState<Partial<FormValues>>({
     lama_perjalanan: 1,
     tanggal_berangkat: format(new Date(), 'yyyy-MM-dd'),
     tanggal_penerbitan: format(new Date(), 'yyyy-MM-dd'),

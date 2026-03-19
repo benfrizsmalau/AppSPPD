@@ -161,8 +161,8 @@ const Register: React.FC = () => {
 
       if (tenantError) throw new Error(tenantError.message);
 
-      // 2. Sign up user
-      const { error: authError } = await supabase.auth.signUp({
+      // 2. Sign up user (trigger handle_new_user akan auto-create user_profiles)
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
         options: {
@@ -180,6 +180,17 @@ const Register: React.FC = () => {
         // Rollback tenant if possible (best effort)
         await supabase.from('tenants').delete().eq('id', tenantData.id);
         throw new Error(authError.message);
+      }
+
+      // 3. Pastikan user_profiles terbuat (backup jika trigger belum aktif)
+      if (authData.user?.id) {
+        await supabase.from('user_profiles').upsert({
+          id: authData.user.id,
+          tenant_id: tenantData.id,
+          nama_lengkap: data.nama_lengkap,
+          role: 'Admin',
+          status_aktif: true,
+        }, { onConflict: 'id', ignoreDuplicates: true });
       }
 
       navigate('/daftar/sukses', {

@@ -58,11 +58,6 @@ function relativeTime(dateStr?: string): string {
   }
 }
 
-function randomPassword(len = 12): string {
-  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
-  return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-}
-
 // ─── Stats Row ────────────────────────────────────────────────────
 
 interface StatsRowProps {
@@ -161,7 +156,7 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
   const [nama, setNama] = useState('');
   const [role, setRole] = useState<UserRole>('Operator');
   const [loading, setLoading] = useState(false);
-  const [tempPass, setTempPass] = useState('');
+  const [done, setDone] = useState(false);
 
   const handleSubmit = async () => {
     if (!email.trim() || !nama.trim()) {
@@ -172,26 +167,52 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
       toast.error('Format email tidak valid');
       return;
     }
+    if (!tenantId) {
+      toast.error('Tenant tidak ditemukan');
+      return;
+    }
     setLoading(true);
     try {
-      const password = randomPassword();
-      setTempPass(password);
-
-      const { error } = await supabase.auth.signUp({
+      // 1. Buat akun di Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.trim(),
-        password,
+        password: Math.random().toString(36).slice(-10) + 'A1!', // temp password — user reset via email
         options: {
           data: {
             nama_lengkap: nama.trim(),
             tenant_id: tenantId,
             role,
           },
+          emailRedirectTo: `${window.location.origin}/masuk`,
         },
       });
 
-      if (error) throw error;
+      if (authError) throw authError;
 
-      toast.success(`Akun berhasil dibuat untuk ${email}. Kirimkan password sementara kepada pengguna.`);
+      const userId = authData.user?.id;
+
+      // 2. Insert user_profiles secara eksplisit sebagai backup
+      // (trigger handle_new_user harusnya sudah menangani ini,
+      //  tapi kita insert eksplisit untuk memastikan)
+      if (userId) {
+        const { error: profileError } = await supabase
+          .from('user_profiles')
+          .upsert({
+            id: userId,
+            tenant_id: tenantId,
+            nama_lengkap: nama.trim(),
+            role,
+            status_aktif: true,
+          }, { onConflict: 'id', ignoreDuplicates: false });
+
+        if (profileError) {
+          // Bukan fatal — trigger mungkin sudah membuat profil
+          console.warn('upsert user_profiles (non-fatal):', profileError.message);
+        }
+      }
+
+      toast.success(`Undangan dikirim ke ${email}. Pengguna perlu konfirmasi email terlebih dahulu.`);
+      setDone(true);
       onSuccess();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal membuat akun';
@@ -200,6 +221,7 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
       setLoading(false);
     }
   };
+
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -212,16 +234,18 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
           <button className="btn-icon btn-ghost" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="modal-body space-y-4">
-          {tempPass ? (
+          {done ? (
             <div className="alert alert-success">
               <Check size={18} className="flex-shrink-0" />
               <div>
-                <p className="font-semibold mb-1">Akun berhasil dibuat!</p>
-                <p className="text-sm mb-2">Salin dan kirimkan password sementara ini kepada pengguna secara aman:</p>
-                <div className="flex items-center gap-2 bg-white border border-emerald-200 rounded-lg px-3 py-2">
-                  <code className="font-mono text-sm text-slate-800 flex-1 select-all">{tempPass}</code>
-                </div>
-                <p className="text-xs mt-2 text-emerald-700">Pengguna sebaiknya mengganti password setelah login pertama.</p>
+                <p className="font-semibold mb-1">Undangan berhasil dikirim!</p>
+                <p className="text-sm text-emerald-700">
+                  Email konfirmasi telah dikirim ke <strong>{email}</strong>.
+                  Pengguna harus klik link di email sebelum bisa login.
+                </p>
+                <p className="text-[11px] mt-2 text-emerald-600">
+                  Setelah konfirmasi, pengguna dapat login dan langsung menggunakan sistem sesuai role <strong>{role}</strong>.
+                </p>
               </div>
             </div>
           ) : (
@@ -229,7 +253,7 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
               <div className="alert alert-info">
                 <Mail size={16} className="flex-shrink-0 mt-0.5" />
                 <p className="text-sm">
-                  Akun baru akan dibuat dengan password sementara yang dapat Anda bagikan kepada pengguna.
+                  Pengguna akan menerima email konfirmasi. Setelah dikonfirmasi, mereka dapat langsung login.
                 </p>
               </div>
               <div className="form-group">
@@ -283,9 +307,9 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>
-            {tempPass ? 'Tutup' : 'Batal'}
+            {done ? 'Tutup' : 'Batal'}
           </button>
-          {!tempPass && (
+          {!done && (
             <button
               className="btn btn-primary"
               onClick={handleSubmit}
@@ -294,12 +318,12 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
               {loading ? (
                 <>
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Membuat...
+                  Mengirim...
                 </>
               ) : (
                 <>
-                  <UserPlus size={14} />
-                  Buat Akun
+                  <Mail size={14} />
+                  Kirim Undangan
                 </>
               )}
             </button>
@@ -511,7 +535,7 @@ export default function UserManagement() {
   const resetPassword = useMutation({
     mutationFn: async (email: string) => {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: `${window.location.origin}/atur-ulang-password`,
       });
       if (error) throw error;
     },
@@ -742,7 +766,6 @@ export default function UserManagement() {
           onClose={() => setShowInvite(false)}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['user_profiles'] });
-            setShowInvite(false);
           }}
         />
       )}

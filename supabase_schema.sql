@@ -156,6 +156,61 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 );
 
 -- =================================================================
+-- 5b. TRIGGER: Auto-create user_profiles on new Supabase Auth user
+-- Fires for BOTH self-register AND admin invite flows.
+-- Reads tenant_id, nama_lengkap, role from raw_user_meta_data.
+-- =================================================================
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_tenant_id UUID;
+  v_role      user_role;
+  v_nama      TEXT;
+BEGIN
+  -- Parse tenant_id from metadata (may be NULL for Super Admin)
+  BEGIN
+    v_tenant_id := (NEW.raw_user_meta_data->>'tenant_id')::UUID;
+  EXCEPTION WHEN OTHERS THEN
+    v_tenant_id := NULL;
+  END;
+
+  -- Parse role safely (default Operator for invited users, Admin for first registration)
+  BEGIN
+    v_role := COALESCE(NEW.raw_user_meta_data->>'role', 'Operator')::user_role;
+  EXCEPTION WHEN OTHERS THEN
+    v_role := 'Operator'::user_role;
+  END;
+
+  -- Use provided nama or derive from email
+  v_nama := COALESCE(
+    NULLIF(TRIM(NEW.raw_user_meta_data->>'nama_lengkap'), ''),
+    split_part(NEW.email, '@', 1)
+  );
+
+  INSERT INTO public.user_profiles (
+    id, tenant_id, nama_lengkap, role, status_aktif, created_at, updated_at
+  ) VALUES (
+    NEW.id,
+    v_tenant_id,
+    v_nama,
+    v_role,
+    TRUE,
+    NOW(),
+    NOW()
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  RETURN NEW;
+END;
+$$;
+
+-- Drop + recreate trigger to ensure idempotency
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- =================================================================
 -- 6. PEGAWAI (Civil Servants)
 -- =================================================================
 CREATE TABLE IF NOT EXISTS pegawai (
@@ -304,9 +359,11 @@ CREATE TABLE IF NOT EXISTS sppd (
   spt_id INT REFERENCES spt(id),
   pejabat_pemberi_perintah_id INT REFERENCES pegawai(id),
   pegawai_id INT REFERENCES pegawai(id),
-  tingkat_perjalanan VARCHAR(5),
+  tingkat_perjalanan VARCHAR(50),
+  tingkat_biaya_id INT REFERENCES ref_tingkat_perjalanan(id),
   maksud_perjalanan TEXT NOT NULL,
   alat_angkut VARCHAR(100),
+  alat_angkut_id INT REFERENCES ref_alat_angkut(id),
   tempat_berangkat VARCHAR(100) NOT NULL,
   tempat_tujuan VARCHAR(100) NOT NULL,
   lama_perjalanan INT NOT NULL DEFAULT 1 CHECK (lama_perjalanan BETWEEN 1 AND 365),
@@ -428,7 +485,7 @@ CREATE TABLE IF NOT EXISTS notifikasi (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_notif_user ON notifikasi(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_notif_user ON notifikasi(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_notif_tenant ON notifikasi(tenant_id);
 
 -- =================================================================
@@ -704,7 +761,7 @@ DO $$
 DECLARE
   t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['spt','sppd','pegawai','penandatangan','instansi','setting_penomoran','user_profiles','approval_config']
+  FOREACH t IN ARRAY ARRAY['spt','sppd','pegawai','penandatangan','instansi','setting_penomoran','user_profiles','approval_config','mata_anggaran']
   LOOP
     EXECUTE format('
       DROP TRIGGER IF EXISTS audit_%1$s ON %1$s;
@@ -787,11 +844,11 @@ ALTER TABLE approval_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE approval_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifikasi ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ref_pangkat ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ref_golongan ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ref_tingkat_perjalanan ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ref_alat_angkut ENABLE ROW LEVEL SECURITY;
+ALTER TABLE login_events ENABLE ROW LEVEL SECURITY;
 
 -- TENANT ISOLATION POLICIES (template)
 CREATE POLICY "tenant_isolation_instansi" ON instansi
@@ -841,6 +898,9 @@ CREATE POLICY "tenant_isolation_audit_log" ON audit_log
 
 CREATE POLICY "own_profile" ON user_profiles
   USING (id = auth.uid() OR tenant_id = get_tenant_id());
+
+CREATE POLICY "tenant_isolation_login_events" ON login_events
+  USING (tenant_id = get_tenant_id() OR user_id = auth.uid());
 
 -- Reference data: global or tenant
 CREATE POLICY "ref_pangkat_access" ON ref_pangkat
