@@ -253,7 +253,7 @@ const ResetPassword: React.FC = () => {
         </div>
 
         <p className="text-xs text-slate-400 text-center mt-6">
-          &copy; {new Date().getFullYear()} SiSPPD — Pemerintah Daerah Papua
+          &copy; {new Date().getFullYear()} SiSPPD — BPPKAD Mamberamo Raya
         </p>
       </motion.div>
     </div>

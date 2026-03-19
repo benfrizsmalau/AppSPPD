@@ -190,6 +190,8 @@ CREATE TABLE IF NOT EXISTS penandatangan (
   id SERIAL PRIMARY KEY,
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   nama_lengkap VARCHAR(100) NOT NULL,
+  gelar_depan VARCHAR(20),
+  gelar_belakang VARCHAR(30),
   nip VARCHAR(18) NOT NULL,
   jabatan VARCHAR(150) NOT NULL,
   pangkat_id INT REFERENCES ref_pangkat(id),
@@ -317,6 +319,8 @@ CREATE TABLE IF NOT EXISTS sppd (
   tempat_penerbitan VARCHAR(100),
   tanggal_penerbitan DATE NOT NULL,
   penandatangan_id INT REFERENCES penandatangan(id),
+  kop_surat TEXT NOT NULL DEFAULT 'skpd'
+    CHECK (kop_surat IN ('skpd','bupati','sekda')),
   status TEXT NOT NULL DEFAULT 'Draft'
     CHECK (status IN ('Draft','Menunggu Persetujuan','Final','Printed','Completed','Cancelled')),
   pdf_file_path TEXT,
@@ -948,4 +952,6 @@ ON CONFLICT DO NOTHING;
 -- ALTER TABLE instansi ADD COLUMN IF NOT EXISTS alamat_sekda TEXT;
 -- ALTER TABLE instansi ADD COLUMN IF NOT EXISTS telepon_sekda VARCHAR(50);
 -- ALTER TABLE spt ADD COLUMN IF NOT EXISTS kop_surat TEXT NOT NULL DEFAULT 'skpd'
+--   CHECK (kop_surat IN ('skpd','bupati','sekda'));
+-- ALTER TABLE sppd ADD COLUMN IF NOT EXISTS kop_surat TEXT NOT NULL DEFAULT 'skpd'
 --   CHECK (kop_surat IN ('skpd','bupati','sekda'));

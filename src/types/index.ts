@@ -147,6 +147,8 @@ export interface Penandatangan {
   id: number;
   tenant_id: string;
   nama_lengkap: string;
+  gelar_depan?: string;
+  gelar_belakang?: string;
   nip: string;
   jabatan: string;
   pangkat_id?: number;
@@ -197,12 +199,12 @@ export interface SPT {
   tempat_penetapan: string;
   dasar_perintah: DasarPerintah[];
   tujuan_kegiatan: string[];
-  lama_kegiatan: number;
+  lama_kegiatan: string;
   pembebanan_anggaran?: string;
   mata_anggaran_id?: number;
   penandatangan_id?: number;
   instansi_id?: number;
-  kop_surat: KopSurat;
+  kop_surat: 'skpd' | 'bupati' | 'sekda';
   status: DocumentStatus;
   pdf_file_path?: string;
   catatan?: string;
@@ -262,7 +264,7 @@ export interface SPPD {
   tanggal_kembali: string;
   instansi_id?: number;
   mata_anggaran_id?: number;
-  mata_anggaran?: string;
+  mata_anggaran?: string | MataAnggaran;
   keterangan_lain?: string;
   tempat_penerbitan?: string;
   tanggal_penerbitan: string;
@@ -429,3 +431,7 @@ export interface AlertInfo {
   message: string;
   action?: { label: string; href: string };
 }
+
+export * from './spt';
+export * from './sppd';
+export * from './penandatangan';

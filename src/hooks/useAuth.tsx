@@ -63,7 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data, error } = await supabase
         .from('user_profiles')
-        .select('*, tenant:tenants(*), pegawai:pegawai(id, nip, nama_lengkap, jabatan)')
+        .select('*, tenant:tenants(*)')
         .eq('id', userId)
         .single();
       if (error) throw error;

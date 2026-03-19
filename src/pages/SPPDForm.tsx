@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link, useSearchParams } from 'react-router-dom';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -44,6 +44,7 @@ const sppdSchema = z.object({
   mata_anggaran_id: z.number().optional().nullable(),
   keterangan_lain: z.string().optional(),
   penandatangan_id: z.number().optional().nullable(),
+  kop_surat: z.enum(['skpd', 'bupati', 'sekda']),
   pengikut: z.array(pengikutSchema).max(3, 'Maksimal 3 pengikut'),
 });
 
@@ -75,6 +76,8 @@ async function fetchSPPDById(id: number) {
 // ── Component ─────────────────────────────────────────────────────────────────
 const SPPDForm: React.FC = () => {
   const { id } = useParams<{ id?: string }>();
+  const [searchParams] = useSearchParams();
+  const sptIdFromUrl = searchParams.get('spt_id');
   const isEdit = !!id;
   const navigate = useNavigate();
   const { tenantId } = useAuth();
@@ -108,12 +111,25 @@ const SPPDForm: React.FC = () => {
     enabled: !!tenantId,
   });
 
+  const { data: linkedSPT } = useQuery<SPT>({
+    queryKey: ['spt-detail', sptIdFromUrl],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('spt')
+        .select('*, spt_pegawai(*, pegawai(*))')
+        .eq('id', Number(sptIdFromUrl))
+        .single();
+      if (error) throw error;
+      return data as SPT;
+    },
+    enabled: !!sptIdFromUrl && !isEdit,
+  });
+
   const { data: sptList = [] } = useQuery<SPT[]>({
     queryKey: ['spt-final', tenantId],
     queryFn: async () => {
       const { data, error } = await supabase.from('spt')
         .select('id, nomor_spt, tanggal_penetapan, status')
-        .eq('tenant_id', tenantId!).eq('status', 'Final').order('tanggal_penetapan', { ascending: false });
+        .eq('tenant_id', tenantId!).neq('status', 'Draft').order('tanggal_penetapan', { ascending: false });
       if (error) throw error;
       return data as SPT[];
     },
@@ -171,16 +187,19 @@ const SPPDForm: React.FC = () => {
   });
 
   // ── Form setup ─────────────────────────────────────────────────────────────
+  const [defaultValues, setDefaultValues] = useState<Partial<FormValues>>({
+    lama_perjalanan: 1,
+    tanggal_berangkat: format(new Date(), 'yyyy-MM-dd'),
+    tanggal_penerbitan: format(new Date(), 'yyyy-MM-dd'),
+    kop_surat: 'skpd',
+    pengikut: [],
+  });
+
   const {
     register, control, handleSubmit, watch, setValue, formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(sppdSchema),
-    defaultValues: {
-      lama_perjalanan: 1,
-      tanggal_berangkat: format(new Date(), 'yyyy-MM-dd'),
-      tanggal_penerbitan: format(new Date(), 'yyyy-MM-dd'),
-      pengikut: [],
-    },
+    defaultValues: defaultValues,
   });
 
   const { fields: pengikutFields, append: appendPengikut, remove: removePengikut, move: movePengikut } = useFieldArray({
@@ -206,6 +225,7 @@ const SPPDForm: React.FC = () => {
     setValue('mata_anggaran_id', s.mata_anggaran_id ?? null);
     setValue('keterangan_lain', s.keterangan_lain ?? '');
     setValue('penandatangan_id', s.penandatangan_id ?? null);
+    setValue('kop_surat', s.kop_surat ?? 'skpd');
     if (s.sppd_pengikut?.length) {
       setValue('pengikut', s.sppd_pengikut.map(p => ({
         tipe: p.tipe,
@@ -217,6 +237,21 @@ const SPPDForm: React.FC = () => {
       })));
     }
   }, [existingSPPD, setValue]);
+
+  // Pre-fill from linked SPT
+  useEffect(() => {
+    if (!linkedSPT || isEdit) return;
+    const s = linkedSPT;
+    setValue('spt_id', s.id);
+    setValue('maksud_perjalanan', s.tujuan_kegiatan?.join(', ') || '');
+    setValue('lama_perjalanan', s.lama_kegiatan || 1);
+    setValue('tanggal_berangkat', s.tanggal_penetapan); // Default to SPT date
+    
+    // Default to first pegawai in SPT if any
+    if (s.spt_pegawai && s.spt_pegawai.length > 0) {
+      setValue('pegawai_id', s.spt_pegawai[0].pegawai_id);
+    }
+  }, [linkedSPT, isEdit, setValue]);
 
   // Watched values for computed fields and preview
   const watchedBerangkat = watch('tanggal_berangkat');
@@ -283,26 +318,34 @@ const SPPDForm: React.FC = () => {
       };
 
       let sppdId: number;
+      let finalNomor: string | null = null;
+
+      if (targetStatus !== 'Draft') {
+        // Only generate number if it doesn't already have one
+        const alreadyHasNomor = (isEdit && existingSPPD?.nomor_sppd);
+        if (!alreadyHasNomor) {
+          const { data: nomorData, error: rpcErr } = await supabase.rpc('get_next_document_number', {
+            p_jenis: 'SPPD',
+            p_tenant_id: tenantId
+          });
+          if (rpcErr) throw rpcErr;
+          finalNomor = nomorData;
+        }
+      }
 
       if (isEdit) {
-        const { error } = await supabase.from('sppd').update(payload).eq('id', Number(id));
+        const updatePayload: any = { ...payload };
+        if (finalNomor) updatePayload.nomor_sppd = finalNomor;
+        
+        const { error } = await supabase.from('sppd').update(updatePayload).eq('id', Number(id));
         if (error) throw error;
         sppdId = Number(id);
         // Remove old pengikut
         await supabase.from('sppd_pengikut').delete().eq('sppd_id', sppdId);
       } else {
-        // Finalize: get nomor via RPC
-        let nomor_sppd: string | null = null;
-        if (targetStatus !== 'Draft') {
-          const { data: nomorData, error: rpcErr } = await supabase.rpc('generate_nomor_sppd', {
-            p_tenant_id: tenantId,
-          });
-          if (rpcErr) throw rpcErr;
-          nomor_sppd = nomorData;
-        }
         const { data: inserted, error } = await supabase
           .from('sppd')
-          .insert({ ...payload, nomor_sppd, print_count: 0 })
+          .insert({ ...payload, nomor_sppd: finalNomor, print_count: 0 })
           .select('id')
           .single();
         if (error) throw error;
@@ -315,7 +358,7 @@ const SPPDForm: React.FC = () => {
           sppd_id: sppdId,
           tipe: p.tipe,
           pegawai_id: p.tipe === 'pegawai' ? p.pegawai_id : null,
-          nama: p.tipe === 'manual' ? p.nama : null,
+          nama: p.nama || (p.tipe === 'pegawai' ? pegawaiList.find(px => px.id === p.pegawai_id)?.nama_lengkap : null),
           umur: p.umur ?? null,
           keterangan: p.keterangan ?? null,
           urutan: i + 1,
@@ -517,10 +560,42 @@ const SPPDForm: React.FC = () => {
                     <option value="">-- Tidak ada SPT --</option>
                     {sptList.map(s => (
                       <option key={s.id} value={s.id}>
-                        {s.nomor_spt} — {format(parseISO(s.tanggal_penetapan), 'dd MMM yyyy', { locale: localeID })}
+                        {s.nomor_spt || `DRAFT-${format(parseISO(s.tanggal_penetapan), 'yyyyMMdd')}`} — {format(parseISO(s.tanggal_penetapan), 'dd MMM yyyy', { locale: localeID })}
                       </option>
                     ))}
                   </select>
+                )} />
+              </div>
+
+              <div className="form-group mb-5">
+                <label className="text-[10px] uppercase font-black tracking-widest text-slate-400 mb-2 block">Jenis Kop Surat</label>
+                <Controller name="kop_surat" control={control} render={({ field }) => (
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { value: 'skpd', icon: '🏢', label: 'SKPD' },
+                      { value: 'bupati', icon: '👑', label: 'Bupati' },
+                      { value: 'sekda', icon: '🏛️', label: 'Sekda' },
+                    ].map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => field.onChange(opt.value)}
+                        className={`relative flex flex-col items-center justify-center py-2.5 px-1 rounded-xl border-2 transition-all ${
+                          field.value === opt.value 
+                            ? 'border-blue-500 bg-blue-50 shadow-sm opacity-100' 
+                            : 'border-slate-100 bg-white hover:border-slate-200 text-slate-400 opacity-60'
+                        }`}
+                      >
+                        <span className="text-lg mb-0.5">{opt.icon}</span>
+                        <span className={`text-[10px] font-black uppercase tracking-tight ${field.value === opt.value ? 'text-blue-700' : 'text-slate-500'}`}>{opt.label}</span>
+                        {field.value === opt.value && (
+                          <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                            <CheckCircle2 size={10} className="text-white" />
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 )} />
               </div>
 
@@ -560,7 +635,7 @@ const SPPDForm: React.FC = () => {
                   >
                     <option value="">Pilih Pejabat</option>
                     {pegawaiList.map(p => (
-                      <option key={p.id} value={p.id}>{p.nama_lengkap}</option>
+                      <option key={p.id} value={p.id}>{p.nama_lengkap} — {p.jabatan}</option>
                     ))}
                   </select>
                 )} />
@@ -612,6 +687,12 @@ const SPPDForm: React.FC = () => {
                     ))}
                   </select>
                 )} />
+              </div>
+
+              <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-100">
+                <button type="button" className="btn btn-primary" onClick={() => setActiveSection(2)}>
+                  Lanjut ke Jadwal <ChevronRight size={14} />
+                </button>
               </div>
             </div>
           )}
@@ -671,6 +752,15 @@ const SPPDForm: React.FC = () => {
                     {...register('tanggal_penerbitan')} />
                 </div>
               </div>
+
+              <div className="flex justify-between gap-3 mt-4 pt-4 border-t border-slate-100">
+                <button type="button" className="btn btn-secondary" onClick={() => setActiveSection(1)}>
+                  <ArrowLeft size={14} /> Kembali
+                </button>
+                <button type="button" className="btn btn-primary" onClick={() => setActiveSection(3)}>
+                  Lanjut ke Anggaran <ChevronRight size={14} />
+                </button>
+              </div>
             </div>
           )}
 
@@ -714,6 +804,15 @@ const SPPDForm: React.FC = () => {
               <div className="form-group">
                 <label className="form-label">Keterangan Lain</label>
                 <textarea className="form-textarea" rows={3} {...register('keterangan_lain')} />
+              </div>
+
+              <div className="flex justify-between gap-3 mt-4 pt-4 border-t border-slate-100">
+                <button type="button" className="btn btn-secondary" onClick={() => setActiveSection(2)}>
+                  <ArrowLeft size={14} /> Kembali
+                </button>
+                <button type="button" className="btn btn-primary" onClick={() => setActiveSection(4)}>
+                  Lanjut ke Pengikut <ChevronRight size={14} />
+                </button>
               </div>
             </div>
           )}
@@ -850,6 +949,20 @@ const SPPDForm: React.FC = () => {
                   })}
                 </div>
               )}
+
+              <div className="flex justify-between gap-3 mt-6 pt-6 border-t border-slate-100">
+                <button type="button" className="btn btn-secondary" onClick={() => setActiveSection(3)}>
+                  <ArrowLeft size={14} /> Kembali
+                </button>
+                <div className="flex gap-2">
+                  <button type="button" className="btn btn-secondary border-slate-200" onClick={() => onSubmit('Draft')} disabled={saveMutation.isPending}>
+                    {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Simpan Draft
+                  </button>
+                  <button type="button" className="btn btn-primary shadow-blue-500/25" onClick={() => onSubmit('Menunggu Persetujuan')} disabled={saveMutation.isPending}>
+                    {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileCheck size={14} />} Finalisasi SPPD
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -876,7 +989,7 @@ const SPPDForm: React.FC = () => {
             <table className="w-full text-xs mb-4" style={{ borderCollapse: 'collapse' }}>
               <tbody>
                 {[
-                  ['Pejabat Yang Memberi Perintah', pegawaiList.find(p => p.id === watch('pejabat_pemberi_perintah_id'))?.nama_lengkap ?? '—'],
+                  ['Pejabat Yang Memberi Perintah', pegawaiList.find(p => p.id === watch('pejabat_pemberi_perintah_id'))?.jabatan ?? '—'],
                   ['Nama / NIP', previewPegawai ? `${previewPegawai.nama_lengkap} / ${previewPegawai.nip}` : '—'],
                   ['Jabatan', previewPegawai?.jabatan ?? '—'],
                   ['Tingkat Biaya Perjalanan', watch('tingkat_perjalanan') || '—'],
@@ -887,6 +1000,10 @@ const SPPDForm: React.FC = () => {
                   ['Lama Perjalanan', watchedLama ? `${watchedLama} hari` : '—'],
                   ['Tgl Berangkat', watchedBerangkat ? format(parseISO(watchedBerangkat), 'dd MMMM yyyy', { locale: localeID }) : '—'],
                   ['Tgl Kembali', tanggalKembali ? format(parseISO(tanggalKembali), 'dd MMMM yyyy', { locale: localeID }) : '—'],
+                  ['Pengikut', watchedPengikut.length > 0
+                    ? `${watchedPengikut.length} orang (${watchedPengikut.map(p => p.tipe === 'pegawai' ? (pegawaiList.find(px => px.id === p.pegawai_id)?.nama_lengkap) : p.nama).join(', ')})`
+                    : '—'
+                  ],
                 ].map(([k, v]) => (
                   <tr key={k}>
                     <td className="py-0.5 pr-2 text-slate-600 w-40">{k}</td>

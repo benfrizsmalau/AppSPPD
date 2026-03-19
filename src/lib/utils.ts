@@ -241,12 +241,17 @@ export function formatNamaLengkap(pegawai: {
   gelar_belakang?: string;
 } | null | undefined): string {
   if (!pegawai) return '-';
-  const parts = [
-    pegawai.gelar_depan,
-    pegawai.nama_lengkap,
-    pegawai.gelar_belakang,
-  ].filter(Boolean);
-  return parts.join(' ');
+  const depan = pegawai.gelar_depan?.trim();
+  const nama = pegawai.nama_lengkap?.trim();
+  const belakang = pegawai.gelar_belakang?.trim();
+
+  let hasil = depan ? `${depan} ` : '';
+  hasil += nama;
+  if (belakang) {
+    // Jika gelar belakang ada, tambahkan koma sebelum gelar pertama
+    hasil += `, ${belakang}`;
+  }
+  return hasil;
 }
 
 // =================================================================

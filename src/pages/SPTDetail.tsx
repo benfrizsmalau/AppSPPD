@@ -325,7 +325,11 @@ export default function SPTDetail() {
             <span className={getStatusClass(spt.status)}>{getStatusLabel(spt.status)}</span>
           </div>
           <p className="doc-number mt-1 text-slate-500">
-            {spt.nomor_spt ?? <span className="italic text-slate-400">Belum bernomor (Draft)</span>}
+            {spt.nomor_spt ?? (
+              <span className="italic text-slate-400">
+                DRAFT-{spt.tanggal_penetapan?.replace(/-/g, '') || '________'}
+              </span>
+            )}
           </p>
         </div>
 
@@ -363,7 +367,7 @@ export default function SPTDetail() {
           {canCreateSPPD(spt.status) && (
             <button
               className="btn btn-success btn-sm"
-              onClick={() => navigate(`/sppd/baru?spt_id=${id}`)}
+              onClick={() => navigate(`/sppd/new?spt_id=${id}`)}
             >
               <Plus size={14} /> Buat SPPD
             </button>

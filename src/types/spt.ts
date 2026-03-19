@@ -1,6 +1,8 @@
 import type { Pegawai, Instansi } from './index';
 import type { Penandatangan } from './penandatangan';
 
+export type KopSurat = 'skpd' | 'bupati' | 'sekda';
+
 export interface SPT {
     id: number;
     nomor_spt: string;
@@ -13,7 +15,7 @@ export interface SPT {
     penandatangan_id: number;
     instansi_id: number;
     status: 'Draft' | 'Final';
-    header_style?: 'SKPD' | 'Bupati' | 'Sekda';
+    kop_surat: KopSurat;
     pdf_file_path?: string;
     catatan?: string;
     created_at?: string;

@@ -164,7 +164,7 @@ const RegisterSukses: React.FC = () => {
         </motion.div>
 
         <p className="text-xs text-slate-400 mt-6">
-          &copy; {new Date().getFullYear()} SiSPPD — Pemerintah Daerah Papua
+          &copy; {new Date().getFullYear()} SiSPPD — BPPKAD Mamberamo Raya
         </p>
       </div>
     </div>

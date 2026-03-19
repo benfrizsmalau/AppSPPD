@@ -45,11 +45,6 @@ const Login: React.FC = () => {
     resolver: zodResolver(loginSchema),
   });
 
-  // Redirect if already logged in
-  if (!loading && user) {
-    return <Navigate to="/" replace />;
-  }
-
   const onSubmit = async (data: LoginFormValues) => {
     setSubmitError(null);
     const result = await signIn(data.email, data.password);
@@ -73,6 +68,11 @@ const Login: React.FC = () => {
       }
     }
   }, [user, profile, navigate]);
+
+  // Redirect if already logged in
+  if (!loading && user) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="min-h-screen flex">
@@ -129,7 +129,7 @@ const Login: React.FC = () => {
             <div>
               <p className="text-2xl font-bold text-white tracking-tight">SiSPPD</p>
               <p className="text-xs font-medium" style={{ color: '#94A3B8' }}>
-                v2.1 — Papua
+                v2.1 — Mamberamo Raya
               </p>
             </div>
           </div>
@@ -176,10 +176,10 @@ const Login: React.FC = () => {
             style={{ borderColor: 'rgba(255,255,255,0.08)' }}
           >
             <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: '#475569' }}>
-              Dikembangkan untuk
+              Dikembangkan Oleh
             </p>
             <p className="text-sm font-bold" style={{ color: '#94A3B8' }}>
-              Pemerintah Daerah Papua
+              Bidang Pendapatan BPPKAD Mamberamo Raya
             </p>
             <p className="text-xs mt-1" style={{ color: '#475569' }}>
               &copy; {new Date().getFullYear()} SiSPPD. All rights reserved.
@@ -210,7 +210,7 @@ const Login: React.FC = () => {
             </div>
             <div>
               <p className="text-xl font-bold text-slate-900">SiSPPD</p>
-              <p className="text-xs text-slate-500">Pemerintah Daerah Papua</p>
+              <p className="text-xs text-slate-500">BPPKAD Mamberamo Raya</p>
             </div>
           </div>
 

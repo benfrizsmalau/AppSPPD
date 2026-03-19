@@ -273,8 +273,21 @@ const PegawaiList: React.FC = () => {
   // ── Modal helpers ──────────────────────────────────────────────────────────
   const openCreate = () => {
     setEditingId(null);
-    reset({ status_aktif: true, nip: '', nama_lengkap: '', jabatan: '' });
     setNipCheckMsg('');
+    reset({
+      status_aktif: true,
+      nip: '',
+      nama_lengkap: '',
+      gelar_depan: '',
+      gelar_belakang: '',
+      jabatan: '',
+      pangkat_id: null,
+      golongan_id: null,
+      unit_kerja_id: null,
+      tanggal_mulai: '',
+      email: '',
+      telepon: '',
+    });
     setModalOpen(true);
   };
 
@@ -425,64 +438,64 @@ const PegawaiList: React.FC = () => {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Data Pegawai</h1>
-          <p className="page-subtitle">Manajemen data Aparatur Sipil Negara</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="btn btn-secondary btn-sm" onClick={downloadTemplate}>
-            <FileSpreadsheet size={15} /> Template
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => setImportOpen(true)}>
-            <Upload size={15} /> Import Excel
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={handleExport}>
-            <Download size={15} /> Export Excel
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={openCreate}>
-            <Plus size={15} /> Tambah Pegawai
-          </button>
+      <div className="premium-header">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shadow-lg shadow-blue-500/20 ring-4 ring-white/50">
+              <Users size={28} className="text-white" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-black tracking-tight">Data Pegawai</h1>
+              <p className="max-w-md font-medium text-slate-500">Manajemen data Aparatur Sipil Negara & Tenaga Kontrak</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="btn btn-secondary" onClick={downloadTemplate}>
+              <FileSpreadsheet size={16} /> Template
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setImportOpen(true)}>
+              <Upload size={16} /> Import
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={handleExport}>
+              <Download size={16} /> Export
+            </button>
+            <button type="button" className="btn btn-primary px-6" onClick={openCreate}>
+              <Plus size={18} /> Tambah Pegawai
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="card p-4">
-          <div className="flex items-center gap-3">
-            <div className="stat-icon bg-blue-50"><Users size={20} className="text-blue-600" /></div>
-            <div>
-              <p className="stat-value text-2xl">{stats?.total ?? '—'}</p>
-              <p className="stat-label">Total Pegawai</p>
-            </div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <QuickStatCard 
+          label="Total Pegawai" 
+          value={stats?.total ?? 0} 
+          icon={<Users size={20} />} 
+          color="blue" 
+        />
+        <QuickStatCard 
+          label="Pegawai Aktif" 
+          value={stats?.aktif ?? 0} 
+          icon={<UserCheck size={20} />} 
+          color="emerald" 
+        />
+        <QuickStatCard 
+          label="Tidak Aktif" 
+          value={stats?.nonaktif ?? 0} 
+          icon={<UserX size={20} />} 
+          color="amber" 
+        />
+        <div className="p-5 rounded-[1.5rem] border border-slate-200 bg-white shadow-xl flex items-start gap-4 transition-all hover:scale-[1.03]">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-indigo-600 text-white shadow-lg shadow-indigo-500/30">
+            <Building2 size={20} />
           </div>
-        </div>
-        <div className="card p-4">
-          <div className="flex items-center gap-3">
-            <div className="stat-icon bg-emerald-50"><UserCheck size={20} className="text-emerald-600" /></div>
-            <div>
-              <p className="stat-value text-2xl">{stats?.aktif ?? '—'}</p>
-              <p className="stat-label">Aktif</p>
-            </div>
-          </div>
-        </div>
-        <div className="card p-4">
-          <div className="flex items-center gap-3">
-            <div className="stat-icon bg-rose-50"><UserX size={20} className="text-rose-600" /></div>
-            <div>
-              <p className="stat-value text-2xl">{stats?.nonaktif ?? '—'}</p>
-              <p className="stat-label">Tidak Aktif</p>
-            </div>
-          </div>
-        </div>
-        <div className="card p-4">
-          <div className="flex items-start gap-3">
-            <div className="stat-icon bg-violet-50 mt-0.5"><Building2 size={20} className="text-violet-600" /></div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-slate-500 mb-1">Top Unit Kerja</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-black uppercase tracking-[0.1em] opacity-50 mb-1.5">Top Unit Kerja</p>
+            <div className="space-y-1">
               {stats?.topUnits.length ? stats.topUnits.map((u, i) => (
-                <p key={i} className="text-xs text-slate-700 truncate">
-                  <span className="font-bold">{u.count}</span> · {u.name}
+                <p key={i} className="text-xs text-slate-700 truncate font-semibold">
+                  <span className="text-indigo-600">{u.count}</span> · {u.name}
                 </p>
               )) : <p className="text-xs text-slate-400">—</p>}
             </div>
@@ -620,10 +633,11 @@ const PegawaiList: React.FC = () => {
                     </td>
                     <td>
                       <div className="flex items-center gap-1 justify-end">
-                        <button title="Edit" className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(p)}>
+                        <button type="button" title="Edit" className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(p)}>
                           <Edit2 size={14} />
                         </button>
                         <button
+                          type="button"
                           title={p.status_aktif ? 'Nonaktifkan' : 'Aktifkan'}
                           className={`btn btn-ghost btn-icon btn-sm ${p.status_aktif ? 'text-rose-500' : 'text-emerald-500'}`}
                           onClick={() => {
@@ -634,6 +648,7 @@ const PegawaiList: React.FC = () => {
                           {p.status_aktif ? <UserX size={14} /> : <UserCheck size={14} />}
                         </button>
                         <button
+                          type="button"
                           title="Lihat Riwayat Perjalanan"
                           className="btn btn-ghost btn-icon btn-sm text-violet-500"
                           onClick={() => window.open(`/riwayat?pegawai_id=${p.id}`, '_blank')}
@@ -912,6 +927,39 @@ const PegawaiList: React.FC = () => {
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+const QuickStatCard: React.FC<{ 
+  label: string; 
+  value: number; 
+  icon: React.ReactNode; 
+  color: string 
+}> = ({ label, value, icon, color }) => {
+  const colorMap: Record<string, string> = {
+    blue: 'from-blue-500/20 to-indigo-500/5 text-blue-700 border-blue-100 shadow-blue-500/5',
+    amber: 'from-amber-500/20 to-orange-500/5 text-amber-700 border-amber-100 shadow-amber-500/5',
+    emerald: 'from-emerald-500/20 to-teal-500/5 text-emerald-700 border-emerald-100 shadow-emerald-500/5',
+    slate: 'from-slate-500/20 to-slate-500/5 text-slate-700 border-slate-200 shadow-slate-500/5',
+  };
+  
+  const iconColorMap: Record<string, string> = {
+    blue: 'bg-blue-600 shadow-blue-500/40',
+    amber: 'bg-amber-600 shadow-amber-500/40',
+    emerald: 'bg-emerald-600 shadow-emerald-500/40',
+    slate: 'bg-slate-600 shadow-slate-500/40',
+  };
+  
+  return (
+    <div className={`p-5 rounded-[1.5rem] border bg-gradient-to-br ${colorMap[color]} flex items-center gap-5 bg-white shadow-xl transition-all hover:scale-[1.03] hover:shadow-2xl`}>
+      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${iconColorMap[color]} text-white shadow-lg`}>
+        {icon}
+      </div>
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-[0.1em] opacity-50 mb-0.5">{label}</p>
+        <p className="text-2xl font-black tracking-tight">{value}</p>
+      </div>
     </div>
   );
 };

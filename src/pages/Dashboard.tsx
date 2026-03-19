@@ -317,13 +317,26 @@ const Dashboard: React.FC = () => {
   const { data: topEmployees = [], isLoading: topLoading } = useQuery<TopEmployee[]>({
     queryKey: ['top-employees-dashboard', tenantId],
     queryFn: async () => {
-      const { data } = await supabase.from('spt_pegawai').select('pegawai_id, pegawai:pegawai_id(nama_lengkap)').limit(200) as { data: { pegawai_id: number; pegawai: { nama_lengkap: string } | null }[] | null };
+      if (!tenantId) return [];
+      const { data } = await supabase
+        .from('spt_pegawai')
+        .select(`
+          pegawai_id, 
+          pegawai:pegawai_id(nama_lengkap),
+          spt:spt_id!inner(tenant_id)
+        `)
+        .eq('spt.tenant_id', tenantId)
+        .limit(200) as any;
+
       const counts: Record<string, number> = {};
       (data || []).forEach((r: any) => {
         const name = r.pegawai?.nama_lengkap;
         if (name) counts[name] = (counts[name] || 0) + 1;
       });
-      return Object.entries(counts).sort((a,b) => b[1] - a[1]).slice(0, 5).map(([nama, jumlah]) => ({ nama, jumlah }));
+      return Object.entries(counts)
+        .sort((a,b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([nama, jumlah]) => ({ nama, jumlah }));
     },
     enabled: !!tenantId,
   });
@@ -429,9 +442,9 @@ const Dashboard: React.FC = () => {
           <div className="card-body flex-1 min-h-[300px] flex items-center justify-center">
             {trendLoading ? (
               <div className="skeleton w-full h-[250px]" />
-            ) : chartData.length === 0 ? (
+            ) : !chartData || chartData.length === 0 ? (
               <div className="empty-state">
-                <p className="empty-state-desc">Belum ada data tren.</p>
+                <p className="empty-state-desc">Belum ada data tren di tahun ini.</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>

@@ -13,6 +13,7 @@ import {
   CheckCircle, Eye, ToggleLeft, ToggleRight, Download, Loader2,
   FileSpreadsheet, Settings as SettingsIcon,
 } from 'lucide-react';
+import { formatNamaLengkap } from '../lib/utils';
 import * as XLSX from 'xlsx';
 
 // ─── Roman numeral helper ────────────────────────────────────────────────────
@@ -184,7 +185,7 @@ const ResetCounterModal: React.FC<ResetCounterModalProps> = ({ isOpen, onClose, 
 
 // ─── Penandatangan Modal ──────────────────────────────────────────────────────
 interface PenandatanganForm {
-  nama_lengkap: string; nip: string; jabatan: string;
+  gelar_depan: string; nama_lengkap: string; gelar_belakang: string; nip: string; jabatan: string;
   pangkat_id: number | ''; golongan_id: number | '';
   unit_kerja_id: number | '';
   jenis_dokumen: string[];
@@ -193,7 +194,7 @@ interface PenandatanganForm {
   status_aktif: boolean;
 }
 const EMPTY_TTD: PenandatanganForm = {
-  nama_lengkap: '', nip: '', jabatan: '',
+  gelar_depan: '', nama_lengkap: '', gelar_belakang: '', nip: '', jabatan: '',
   pangkat_id: '', golongan_id: '', unit_kerja_id: '',
   jenis_dokumen: [], ttd_digital_path: '',
   periode_mulai: '', periode_selesai: '', status_aktif: true,
@@ -214,7 +215,10 @@ const PenandatanganModal: React.FC<PenandatanganModalProps> = ({ isOpen, onClose
   useEffect(() => {
     if (data) {
       setForm({
-        nama_lengkap: data.nama_lengkap, nip: data.nip, jabatan: data.jabatan,
+        gelar_depan: data.gelar_depan ?? '',
+        nama_lengkap: data.nama_lengkap,
+        gelar_belakang: data.gelar_belakang ?? '',
+        nip: data.nip, jabatan: data.jabatan,
         pangkat_id: data.pangkat_id ?? '', golongan_id: data.golongan_id ?? '',
         unit_kerja_id: data.unit_kerja_id ?? '',
         jenis_dokumen: data.jenis_dokumen ?? [],
@@ -262,9 +266,18 @@ const PenandatanganModal: React.FC<PenandatanganModalProps> = ({ isOpen, onClose
         </div>
         <div className="modal-body">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="form-group md:col-span-2">
+            <div className="form-group">
+              <label className="form-label">Gelar Depan</label>
+              <input className="form-input" value={form.gelar_depan} onChange={e => setForm(f => ({ ...f, gelar_depan: e.target.value }))} placeholder="Contoh: Drs., Ir." />
+            </div>
+            <div className="form-group">
               <label className="form-label">Nama Lengkap <span className="required-mark">*</span></label>
-              <input className="form-input" value={form.nama_lengkap} onChange={e => setForm(f => ({ ...f, nama_lengkap: e.target.value }))} placeholder="Nama lengkap beserta gelar" />
+              <input className="form-input font-bold" value={form.nama_lengkap} onChange={e => setForm(f => ({ ...f, nama_lengkap: e.target.value }))} placeholder="Nama tanpa gelar" />
+            </div>
+            <div className="form-group md:col-span-2">
+              <label className="form-label">Gelar Belakang</label>
+              <input className="form-input" value={form.gelar_belakang} onChange={e => setForm(f => ({ ...f, gelar_belakang: e.target.value }))} placeholder="Contoh: S.E., M.Si." />
+              <p className="text-[10px] text-slate-400 mt-1">Gelar belakang akan otomatis dipisahkan dengan tanda koma.</p>
             </div>
             <div className="form-group">
               <label className="form-label">NIP <span className="required-mark">*</span></label>
@@ -962,7 +975,7 @@ const Settings: React.FC = () => {
                   {penandatangans.map(p => (
                     <tr key={p.id}>
                       <td>
-                        <div className="font-semibold text-slate-800">{p.nama_lengkap}</div>
+                        <div className="font-semibold text-slate-800">{formatNamaLengkap(p)}</div>
                         <div className="doc-number text-slate-400">{p.nip}</div>
                       </td>
                       <td className="text-sm">{p.jabatan}</td>

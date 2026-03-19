@@ -318,6 +318,7 @@ export default function SPPDDetail() {
           tempat_penerbitan: base.tempat_penerbitan,
           tanggal_penerbitan: base.tanggal_penerbitan,
           penandatangan_id: base.penandatangan_id,
+          kop_surat: base.kop_surat,
           parent_sppd_id: base.id,
           status: 'Draft' as DocumentStatus,
           print_count: 0,

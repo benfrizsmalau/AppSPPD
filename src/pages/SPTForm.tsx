@@ -393,11 +393,27 @@ const SPTPreviewPanel: React.FC<PreviewPanelProps> = ({
     <div className="preview-panel text-xs leading-relaxed overflow-y-auto max-h-[calc(100vh-200px)]">
       {/* KOP */}
       <div className="text-center border-b-2 border-slate-800 pb-3 mb-4">
-        <p className="font-bold text-sm uppercase tracking-wide">
-          {instansi?.nama_lengkap ?? 'NAMA INSTANSI'}
+        {formValues.kop_surat === 'bupati' ? (
+          <p className="font-bold text-sm uppercase tracking-wide">
+            {instansi?.jabatan_kepala_daerah || `BUPATI ${instansi?.kabupaten_kota?.toUpperCase() || ''}`}
+          </p>
+        ) : formValues.kop_surat === 'sekda' ? (
+          <>
+            <p className="font-bold text-[10px] uppercase tracking-wider mb-0.5">
+              PEMERINTAH {instansi?.kabupaten_kota ? `KABUPATEN ${instansi.kabupaten_kota.toUpperCase()}` : ''}
+            </p>
+            <p className="font-bold text-sm uppercase tracking-wide">SEKRETARIAT DAERAH</p>
+          </>
+        ) : (
+          <p className="font-bold text-sm uppercase tracking-wide">
+            {instansi?.nama_lengkap ?? 'NAMA INSTANSI'}
+          </p>
+        )}
+        <p className="text-[10px] text-slate-500 mt-1">
+          {formValues.kop_surat === 'bupati' ? (instansi?.alamat_bupati || instansi?.alamat) :
+           formValues.kop_surat === 'sekda' ? (instansi?.alamat_sekda || instansi?.alamat) :
+           instansi?.alamat || 'Alamat Instansi'}
         </p>
-        <p className="text-[11px] text-slate-500">{instansi?.alamat ?? 'Alamat Instansi'}</p>
-        {instansi?.telepon && <p className="text-[11px] text-slate-500">Telp. {instansi.telepon}</p>}
       </div>
 
       {/* Title */}

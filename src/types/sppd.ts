@@ -1,4 +1,4 @@
-import type { Pegawai, Instansi } from './index';
+import type { Pegawai, Instansi, KopSurat } from './index';
 import type { SPT } from './spt';
 import type { Penandatangan } from './penandatangan';
 
@@ -25,6 +25,7 @@ export interface SPPD {
     instansi_id: number;
     penandatangan_id: number;
     status: 'Draft' | 'Final';
+    kop_surat: KopSurat;
     pdf_file_path?: string;
     created_at?: string;
 

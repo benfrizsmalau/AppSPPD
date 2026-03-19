@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import {
   Plus, Search, Printer, Edit2, Eye, CheckCircle2, XCircle,
   RotateCcw, Loader2, MapPin, Calendar, ChevronLeft, ChevronRight,
-  FileText, AlertTriangle,
+  FileText, AlertTriangle, Plane,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { id as localeID } from 'date-fns/locale';
@@ -27,18 +27,20 @@ const STATUS_CHIPS: { label: string; value: FilterStatus }[] = [
   { label: 'Cancelled', value: 'Cancelled' },
 ];
 
-function getStatusClass(status: DocumentStatus): string {
-  const map: Record<DocumentStatus, string> = {
-    Draft: 'status-draft',
-    'Menunggu Persetujuan': 'status-pending',
-    Final: 'status-final',
-    Printed: 'status-printed',
-    Completed: 'status-completed',
-    Cancelled: 'status-cancelled',
-    Expired: 'status-expired',
-  };
-  return map[status] ?? 'badge badge-slate';
-}
+const StatusBadge: React.FC<{ status: DocumentStatus }> = ({ status }) => {
+  const glowClass = status === 'Final' || status === 'Printed' || status === 'Completed' 
+    ? 'status-final-glow' 
+    : status === 'Menunggu Persetujuan' 
+    ? 'status-pending-glow' 
+    : 'status-draft-glow';
+    
+  return (
+    <span className={`badge-glow ${glowClass}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+      {status}
+    </span>
+  );
+};
 
 interface SPPDRow extends Omit<SPPD, 'pegawai' | 'penandatangan'> {
   pegawai: { nama_lengkap: string; nip: string } | null;
@@ -191,15 +193,57 @@ const SPPDList: React.FC = () => {
   return (
     <div className="flex flex-col gap-6">
       {/* Page Header */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Surat Perintah Perjalanan Dinas</h1>
-          <p className="page-subtitle">Kelola seluruh dokumen SPPD ASN di instansi Anda</p>
+      <div className="premium-header">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-4 mb-3">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-4 ring-white/50">
+                <Plane size={28} className="text-white" />
+              </div>
+              <h1 className="text-3xl font-black tracking-tight">Perjalanan Dinas (SPPD)</h1>
+            </div>
+            <p className="max-w-md font-medium">
+              Pantau dan kelola realisasi perjalanan dinas serta pembebanan anggaran instansi Anda.
+            </p>
+          </div>
+          <Link 
+            to="/sppd/new" 
+            className="btn btn-primary h-14 px-8 rounded-2xl shadow-xl shadow-blue-500/25 flex items-center gap-3 group transition-all"
+          >
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center group-hover:rotate-90 transition-transform duration-300">
+              <Plus size={20} className="text-white" />
+            </div>
+            <span className="font-bold text-lg">Tambah SPPD</span>
+          </Link>
         </div>
-        <Link to="/sppd/new" className="btn btn-primary">
-          <Plus size={16} />
-          Tambah SPPD
-        </Link>
+      </div>
+
+      {/* Quick Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <QuickStatCard 
+          label="Total SPPD" 
+          value={total} 
+          icon={<FileText size={18} />} 
+          color="blue" 
+        />
+        <QuickStatCard 
+          label="Draft/Pending" 
+          value={rows.filter(r => r.status === 'Draft' || r.status === 'Menunggu Persetujuan').length} 
+          icon={<AlertTriangle size={18} />} 
+          color="amber" 
+        />
+        <QuickStatCard 
+          label="Final/Printed" 
+          value={rows.filter(r => r.status === 'Final' || r.status === 'Printed').length} 
+          icon={<RotateCcw size={18} />} 
+          color="emerald" 
+        />
+        <QuickStatCard 
+          label="Completed" 
+          value={rows.filter(r => r.status === 'Completed').length} 
+          icon={<CheckCircle2 size={18} />} 
+          color="blue" 
+        />
       </div>
 
       {/* Status Chips */}
@@ -216,39 +260,52 @@ const SPPDList: React.FC = () => {
       </div>
 
       {/* Search & Date Filter */}
-      <div className="card card-body flex flex-wrap items-end gap-4">
-        <div className="flex-1 min-w-[220px]">
-          <label className="form-label mb-1">Cari</label>
-          <div className="search-wrap">
-            <Search size={16} className="search-icon" />
+      <div className="bg-white/50 backdrop-blur-sm border border-slate-200 rounded-2xl p-4 flex flex-col lg:flex-row gap-4 items-start lg:items-center shadow-sm">
+        <div className="search-wrap flex-1 min-w-0 bg-white shadow-inner border-slate-100 h-11">
+          <Search size={18} className="search-icon text-slate-400" />
+          <input
+            type="text"
+            className="search-input text-sm h-full"
+            placeholder="Cari nomor SPPD, pegawai, tujuan..."
+            value={searchRaw}
+            onChange={e => handleSearchChange(e.target.value)}
+          />
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-white px-3 h-11 rounded-xl border border-slate-100 shadow-inner">
+            <Calendar size={16} className="text-slate-400" />
             <input
-              type="text"
-              className="search-input form-input"
-              placeholder="Nomor SPPD, nama/NIP pegawai, tujuan..."
-              value={searchRaw}
-              onChange={e => handleSearchChange(e.target.value)}
+              type="date"
+              className="bg-transparent border-none focus:ring-0 text-xs font-semibold text-slate-700 w-32"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+            />
+            <span className="text-slate-300">—</span>
+            <input
+              type="date"
+              className="bg-transparent border-none focus:ring-0 text-xs font-semibold text-slate-700 w-32"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
             />
           </div>
-        </div>
-        <div className="flex gap-3 flex-wrap">
-          <div className="form-group">
-            <label className="form-label">Tgl Berangkat (dari)</label>
-            <input type="date" className="form-input" value={dateFrom}
-              onChange={e => setDateFrom(e.target.value)} />
+          
+          <div className="h-8 w-px bg-slate-200 hidden sm:block mx-1" />
+          
+          <div className="flex gap-1 overflow-x-auto pb-1 sm:pb-0 no-scrollbar">
+            {STATUS_CHIPS.slice(0, 4).map(c => (
+              <button
+                key={c.value}
+                className={`px-4 h-9 rounded-xl text-xs font-bold transition-all
+                  ${statusFilter === c.value 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' 
+                    : 'bg-white text-slate-600 border border-slate-100 hover:border-blue-200'}`}
+                onClick={() => setStatusFilter(c.value)}
+              >
+                {c.label}
+              </button>
+            ))}
           </div>
-          <div className="form-group">
-            <label className="form-label">Sampai</label>
-            <input type="date" className="form-input" value={dateTo}
-              onChange={e => setDateTo(e.target.value)} />
-          </div>
-          {(dateFrom || dateTo || search) && (
-            <div className="form-group justify-end">
-              <label className="form-label invisible">reset</label>
-              <button className="btn btn-ghost btn-sm" onClick={() => {
-                setDateFrom(''); setDateTo(''); setSearchRaw(''); setSearch('');
-              }}>Reset Filter</button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -261,13 +318,16 @@ const SPPDList: React.FC = () => {
       )}
 
       {/* Table */}
-      <div className="card">
-        <div className="card-header">
-          <span className="text-sm font-semibold text-slate-700">
-            {isFetching ? 'Memuat...' : `${total} dokumen ditemukan`}
+      <div className="premium-table-wrap">
+        <div className="px-6 py-4 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Daftar Perjalanan Dinas
+          </span>
+          <span className="text-xs font-semibold text-slate-400">
+            {isFetching ? 'Memuat...' : `${total} dokumen`}
           </span>
         </div>
-        <div className="table-wrap rounded-none border-0">
+        <div className="table-wrap rounded-none border-0 bg-transparent">
           {isLoading ? (
             <div className="empty-state">
               <Loader2 size={32} className="animate-spin text-blue-500 mb-3" />
@@ -340,7 +400,7 @@ const SPPDList: React.FC = () => {
                     </td>
                     <td className="text-slate-600 text-sm">{row.lama_perjalanan} hari</td>
                     <td>
-                      <span className={getStatusClass(row.status)}>{row.status}</span>
+                      <StatusBadge status={row.status} />
                     </td>
                     <td onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1 justify-end">
@@ -483,6 +543,39 @@ const SPPDList: React.FC = () => {
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+const QuickStatCard: React.FC<{ 
+  label: string; 
+  value: number; 
+  icon: React.ReactNode; 
+  color: string 
+}> = ({ label, value, icon, color }) => {
+  const colorMap: Record<string, string> = {
+    blue: 'from-blue-500/20 to-indigo-500/5 text-blue-700 border-blue-100 shadow-blue-500/5',
+    amber: 'from-amber-500/20 to-orange-500/5 text-amber-700 border-amber-100 shadow-amber-500/5',
+    emerald: 'from-emerald-500/20 to-teal-500/5 text-emerald-700 border-emerald-100 shadow-emerald-500/5',
+    slate: 'from-slate-500/20 to-slate-500/5 text-slate-700 border-slate-200 shadow-slate-500/5',
+  };
+  
+  const iconColorMap: Record<string, string> = {
+    blue: 'bg-blue-600 shadow-blue-500/40',
+    amber: 'bg-amber-600 shadow-amber-500/40',
+    emerald: 'bg-emerald-600 shadow-emerald-500/40',
+    slate: 'bg-slate-600 shadow-slate-500/40',
+  };
+  
+  return (
+    <div className={`p-5 rounded-[1.5rem] border bg-gradient-to-br ${colorMap[color]} flex items-center gap-5 bg-white shadow-xl transition-all hover:scale-[1.03] hover:shadow-2xl`}>
+      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${iconColorMap[color]} text-white shadow-lg`}>
+        {icon}
+      </div>
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-[0.1em] opacity-50 mb-0.5">{label}</p>
+        <p className="text-2xl font-black tracking-tight">{value}</p>
+      </div>
     </div>
   );
 };

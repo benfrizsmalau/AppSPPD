@@ -547,7 +547,11 @@ const SPTList: React.FC = () => {
 
                     <td>
                       <span className="doc-number text-slate-800">
-                        {spt.nomor_spt ?? <span className="text-slate-400 italic">Belum dinomori</span>}
+                        {spt.nomor_spt ?? (
+                          <span className="text-slate-400 italic">
+                            DRAFT-{spt.tanggal_penetapan?.replace(/-/g, '') || '________'}
+                          </span>
+                        )}
                       </span>
                     </td>
 

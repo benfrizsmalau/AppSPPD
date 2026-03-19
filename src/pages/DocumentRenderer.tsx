@@ -151,7 +151,7 @@ interface SignatureBlockProps {
   penandatangan: Penandatangan | null | undefined;
 }
 const SignatureBlock: React.FC<SignatureBlockProps> = ({ label, place, date, penandatangan }) => (
-  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '16px', pageBreakInside: 'avoid' }}>
+  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px', pageBreakBefore: 'avoid', pageBreakInside: 'avoid' }}>
     <div style={{ width: '320px', textAlign: 'center', fontFamily: '"Times New Roman", Times, serif' }}>
       <div style={{ textAlign: 'left', marginBottom: '8px' }}>
         <p style={{ margin: 0, fontSize: '10.5pt' }}>{label ?? 'Ditetapkan di'} : {place}</p>
@@ -224,7 +224,7 @@ const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
                         if (d.jenis === 'surat' && d.nomor) {
                           teks = `${d.perihal} Nomor : ${d.nomor} tanggal ${fmtDate(d.tanggal ?? '')}`;
                         } else if (d.jenis === 'lisan') {
-                          teks = `Perintah Lisan: ${d.perihal}`;
+                          teks = d.perihal;
                         }
                         return (
                           <tr key={i}>
@@ -332,20 +332,31 @@ const SPPDDocumentPage1: React.FC<{ data: SPPD }> = ({ data }) => {
 
   return (
     <div style={{ position: 'relative' }}>
+      <style>{`
+        @page { size: 215mm 330mm; margin: 15mm; }
+        @media print { body { -webkit-print-color-adjust: exact; } }
+      `}</style>
       {isDraft && <DraftWatermark />}
-      <KopSurat instansi={data.instansi} />
+      <KopSurat instansi={data.instansi} jenis={data.kop_surat ?? 'skpd'} />
 
       <div style={{ fontFamily: '"Times New Roman", Times, serif', fontSize: '11pt', color: '#000' }}>
-        <div style={{ textAlign: 'center', marginBottom: '10px' }}>
-          <h3 style={{ margin: 0, fontSize: '13pt', fontWeight: 'bold', textDecoration: 'underline', letterSpacing: '1px' }}>SURAT PERINTAH PERJALANAN DINAS</h3>
-          <p style={{ margin: '2px 0 0', fontSize: '11pt' }}>(S P P D)</p>
-          {data.nomor_sppd && <p style={{ margin: '3px 0 0', fontSize: '11pt' }}>Nomor : <strong>{data.nomor_sppd}</strong></p>}
+        <div style={{ textAlign: 'center', marginBottom: '6px' }}>
+          <h3 style={{ margin: 0, fontSize: '12pt', fontWeight: 'bold', textDecoration: 'underline' }}>SURAT PERINTAH PERJALANAN DINAS</h3>
+          <p style={{ margin: '0', fontSize: '10pt' }}>(S P P D)</p>
+          <p style={{ margin: '1px 0 0', fontSize: '10pt' }}>Nomor : <strong>{data.nomor_sppd || '................................'}</strong></p>
         </div>
 
-        <table style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #000', tableLayout: 'fixed', marginBottom: '10px' }}>
+        <table style={{ 
+          width: '100%', 
+          borderCollapse: 'collapse', 
+          border: '1.5px solid #000', 
+          tableLayout: 'fixed', 
+          marginBottom: '4px',
+          pageBreakAfter: 'avoid'
+        }}>
           <tbody>
             {[
-              { num: '1.', label: 'Pejabat Pemberi Perintah', value: data.penandatangan?.jabatan ?? '—' },
+              { num: '1.', label: 'Pejabat Yang Memberi Perintah', value: (data as any).pejabat_pemberi_perintah?.jabatan || data.penandatangan?.jabatan || '—' },
               { num: '2.', label: 'Nama/NIP Pegawai yang Diperintah', value: (
                 <><strong>{formatNamaLengkap(data.pegawai)}</strong><br />NIP. {data.pegawai?.nip}</>
               )},
@@ -382,14 +393,18 @@ const SPPDDocumentPage1: React.FC<{ data: SPPD }> = ({ data }) => {
                 )
               )},
               { num: '9.', label: (<>Pembebanan Anggaran<br />a. Instansi<br />b. Mata Anggaran</>), value: (
-                <><br />a. {data.instansi?.nama_lengkap ?? '—'}<br />b. {data.mata_anggaran ?? data.spt?.pembebanan_anggaran ?? '—'}</>
+                <><br />a. {data.instansi?.nama_lengkap ?? '—'}<br />b. {
+                  typeof data.mata_anggaran === 'object' && data.mata_anggaran !== null
+                    ? `${data.mata_anggaran.kode} — ${data.mata_anggaran.nama}`
+                    : (data.mata_anggaran || data.spt?.pembebanan_anggaran || '—')
+                }</>
               )},
               { num: '10.', label: 'Keterangan Lain-Lain', value: data.keterangan_lain ?? '—' },
             ].map((row, i) => (
-              <tr key={i}>
-                <td style={{ border: '1px solid #000', padding: '4px 6px', width: '44px', verticalAlign: 'top', textAlign: 'center', fontWeight: 'bold' }}>{row.num}</td>
-                <td style={{ border: '1px solid #000', padding: '4px 8px', width: '200px', verticalAlign: 'top' }}>{row.label}</td>
-                <td style={{ border: '1px solid #000', padding: '4px 8px', verticalAlign: 'top', lineHeight: 1.4 }}>{row.value}</td>
+              <tr key={i} style={{ pageBreakInside: 'avoid' }}>
+                <td style={{ border: '1px solid #000', padding: '2px 4px', width: '38px', verticalAlign: 'top', textAlign: 'center', fontWeight: 'bold', fontSize: '10pt' }}>{row.num}</td>
+                <td style={{ border: '1px solid #000', padding: '2px 6px', width: '180px', verticalAlign: 'top', fontSize: '10pt' }}>{row.label}</td>
+                <td style={{ border: '1px solid #000', padding: '2px 6px', verticalAlign: 'top', lineHeight: 1.2, fontSize: '10pt' }}>{row.value}</td>
               </tr>
             ))}
           </tbody>
@@ -462,7 +477,10 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
   ];
 
   return (
-    <div style={{ fontFamily: '"Times New Roman", Times, serif', fontSize: '10pt', color: '#000' }}>
+    <div style={{ fontFamily: '"Times New Roman", Times, serif', fontSize: '10pt', color: '#000', paddingTop: '10mm' }}>
+      <style>{`
+        @page { size: 215mm 330mm; margin: 15mm; }
+      `}</style>
       <table style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #000', marginBottom: '12px' }}>
         <tbody>
           {/* Row I: Berangkat + empty */}
@@ -626,6 +644,7 @@ const DocumentRenderer: React.FC = () => {
             .from('sppd')
             .select(`
               *,
+              pejabat_pemberi_perintah:pejabat_pemberi_perintah_id(*),
               instansi:instansi_id(*),
               penandatangan:penandatangan_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*)),
               pegawai:pegawai_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*)),
