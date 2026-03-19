@@ -54,12 +54,13 @@ SET format_pattern = EXCLUDED.format_pattern;
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.user_profiles (id, username, nama_lengkap, role)
+  INSERT INTO public.user_profiles (id, username, nama_lengkap, role, tenant_id)
   VALUES (
     new.id, 
     new.email, 
-    COALESCE(new.raw_user_meta_data->>'full_name', new.email), 
-    'Operator'
+    COALESCE(new.raw_user_meta_data->>'nama_lengkap', new.raw_user_meta_data->>'full_name', new.email), 
+    COALESCE(new.raw_user_meta_data->>'role', 'Operator'),
+    (new.raw_user_meta_data->>'tenant_id')::uuid
   );
   RETURN new;
 END;

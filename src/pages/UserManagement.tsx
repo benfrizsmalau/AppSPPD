@@ -17,7 +17,14 @@ import {
   KeyRound,
   Search,
   ChevronDown,
+  Loader2,
 } from 'lucide-react';
+
+/** Generate password acak yang kuat (min 12 karakter) */
+function randomPassword(len = 12): string {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
+  return Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
 import { formatDate, getInitials } from '../lib/utils';
 import { toast } from 'sonner';
 import type { UserProfile, UserRole } from '../types';
@@ -156,7 +163,9 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
   const [nama, setNama] = useState('');
   const [role, setRole] = useState<UserRole>('Operator');
   const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
+  const [tempPass, setTempPass] = useState('');
+  const [resetEmailSent, setResetEmailSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const handleSubmit = async () => {
     if (!email.trim() || !nama.trim()) {
@@ -167,61 +176,81 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
       toast.error('Format email tidak valid');
       return;
     }
-    if (!tenantId) {
-      toast.error('Tenant tidak ditemukan');
-      return;
-    }
+
+    if (!tenantId) { toast.error('Tenant tidak ditemukan'); return; }
     setLoading(true);
     try {
-      // 1. Buat akun di Supabase Auth
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const password = randomPassword();
+
+      // ── Simpan session admin sebelum signUp ──────────────────────
+      // signUp() bisa mengganti session aktif jika email confirmation
+      // dinonaktifkan di Supabase → admin ter-logout tanpa disadari.
+      const { data: adminSession } = await supabase.auth.getSession();
+
+      const { data: newUser, error } = await supabase.auth.signUp({
         email: email.trim(),
-        password: Math.random().toString(36).slice(-10) + 'A1!', // temp password — user reset via email
+        password,
         options: {
           data: {
             nama_lengkap: nama.trim(),
             tenant_id: tenantId,
             role,
           },
-          emailRedirectTo: `${window.location.origin}/masuk`,
         },
       });
 
-      if (authError) throw authError;
+      if (error) throw error;
 
-      const userId = authData.user?.id;
-
-      // 2. Insert user_profiles secara eksplisit sebagai backup
-      // (trigger handle_new_user harusnya sudah menangani ini,
-      //  tapi kita insert eksplisit untuk memastikan)
-      if (userId) {
-        const { error: profileError } = await supabase
-          .from('user_profiles')
-          .upsert({
-            id: userId,
-            tenant_id: tenantId,
-            nama_lengkap: nama.trim(),
-            role,
-            status_aktif: true,
-          }, { onConflict: 'id', ignoreDuplicates: false });
-
-        if (profileError) {
-          // Bukan fatal — trigger mungkin sudah membuat profil
-          console.warn('upsert user_profiles (non-fatal):', profileError.message);
-        }
+      // ── Pulihkan session admin jika berganti ─────────────────────
+      const { data: currentSession } = await supabase.auth.getSession();
+      if (
+        adminSession.session &&
+        currentSession.session?.user.id !== adminSession.session.user.id
+      ) {
+        await supabase.auth.setSession({
+          access_token: adminSession.session.access_token,
+          refresh_token: adminSession.session.refresh_token,
+        });
       }
 
-      toast.success(`Undangan dikirim ke ${email}. Pengguna perlu konfirmasi email terlebih dahulu.`);
-      setDone(true);
+      // ── Buat user_profiles eksplisit (backup sebelum trigger aktif) ─
+      if (newUser.user?.id) {
+        await supabase.from('user_profiles').upsert({
+          id: newUser.user.id,
+          tenant_id: tenantId,
+          nama_lengkap: nama.trim(),
+          role,
+          status_aktif: true,
+        }, { onConflict: 'id', ignoreDuplicates: false });
+      }
+
+      setTempPass(password);
+      toast.success(`Akun berhasil dibuat untuk ${email}`);
       onSuccess();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Gagal membuat akun';
       toast.error(msg);
+      setTempPass('');
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSendReset = async () => {
+    setResetLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/atur-ulang-password`,
+      });
+      if (error) throw error;
+      setResetEmailSent(true);
+      toast.success('Link aktivasi telah dikirim ke email');
+    } catch (err) {
+      toast.error('Gagal mengirim link aktivasi');
+    } finally {
+      setResetLoading(false);
+    }
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -234,65 +263,89 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
           <button className="btn-icon btn-ghost" onClick={onClose}><X size={18} /></button>
         </div>
         <div className="modal-body space-y-4">
-          {done ? (
+          {tempPass ? (
             <div className="alert alert-success">
               <Check size={18} className="flex-shrink-0" />
               <div>
-                <p className="font-semibold mb-1">Undangan berhasil dikirim!</p>
-                <p className="text-sm text-emerald-700">
-                  Email konfirmasi telah dikirim ke <strong>{email}</strong>.
-                  Pengguna harus klik link di email sebelum bisa login.
-                </p>
-                <p className="text-[11px] mt-2 text-emerald-600">
-                  Setelah konfirmasi, pengguna dapat login dan langsung menggunakan sistem sesuai role <strong>{role}</strong>.
-                </p>
+                <p className="font-semibold mb-1">Akun berhasil dibuat!</p>
+                <div className="mb-3">
+                  <p className="text-sm mb-2">Password sementara (bagikan manual):</p>
+                  <div className="flex items-center gap-2 bg-white border border-emerald-200 rounded-lg px-3 py-2 shadow-inner">
+                    <code className="font-mono text-sm text-slate-800 flex-1 select-all">{tempPass}</code>
+                  </div>
+                  <p className="text-[10px] mt-2 text-emerald-600 leading-relaxed italic">
+                    * Berikan email dan password di atas ke pengguna agar bisa langsung login.
+                  </p>
+                </div>
+
+                <div className="border-t border-emerald-100 pt-3 mt-1">
+                  <p className="text-sm mb-2">Atau kirim link aktivasi (pengaturan password mandiri):</p>
+                  <button 
+                    className={`btn btn-sm ${resetEmailSent ? 'btn-success' : 'btn-primary'} w-full`}
+                    onClick={handleSendReset}
+                    disabled={resetLoading || resetEmailSent}
+                  >
+                    {resetLoading ? (
+                      <span className="flex items-center justify-center gap-2 py-0.5">
+                        <Loader2 size={14} className="animate-spin" />
+                        Mengirim Link...
+                      </span>
+                    ) : resetEmailSent ? (
+                      <span className="flex items-center justify-center gap-2 py-0.5">
+                        <Check size={14} />
+                        Link Terkirim
+                      </span>
+                    ) : (
+                      'Kirim Link Aktivasi ke Email'
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
             <>
-              <div className="alert alert-info">
-                <Mail size={16} className="flex-shrink-0 mt-0.5" />
-                <p className="text-sm">
-                  Pengguna akan menerima email konfirmasi. Setelah dikonfirmasi, mereka dapat langsung login.
-                </p>
-              </div>
               <div className="form-group">
-                <label className="form-label">
-                  Nama Lengkap <span className="required-mark">*</span>
-                </label>
-                <input
-                  className="form-input"
-                  value={nama}
-                  onChange={e => setNama(e.target.value)}
-                  placeholder="Nama lengkap pengguna baru"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">
-                  Email <span className="required-mark">*</span>
-                </label>
+                <label className="form-label">Email Pengguna <span className="required-mark">*</span></label>
                 <input
                   type="email"
                   className="form-input"
+                  placeholder="nama@email.com"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
-                  placeholder="email@instansi.go.id"
+                  disabled={loading}
+                />
+              </div>
+              <div className="form-group focus-within:z-10">
+                <label className="form-label">Nama Lengkap <span className="required-mark">*</span></label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Masukkan nama lengkap"
+                  value={nama}
+                  onChange={e => setNama(e.target.value)}
+                  disabled={loading}
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">
-                  Role <span className="required-mark">*</span>
-                </label>
-                <select
-                  className="form-select"
-                  value={role}
-                  onChange={e => setRole(e.target.value as UserRole)}
-                >
-                  {Object.entries(ROLE_LABELS).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
+                <label className="form-label font-bold text-slate-700">Role / Akses Sistem</label>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([v, l]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setRole(v)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold border-2 transition-all ${
+                        role === v 
+                          ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-md ring-2 ring-blue-100' 
+                          : 'border-slate-100 bg-white text-slate-500 hover:border-slate-200'
+                      }`}
+                      disabled={loading}
+                    >
+                      {l}
+                    </button>
                   ))}
-                </select>
-                <p className="form-hint">
+                </div>
+                <p className="form-hint text-[11px] leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-slate-500 italic">
                   {role === 'Admin'
                     ? 'Akses penuh — dapat mengelola semua data dan pengguna.'
                     : role === 'Operator'
@@ -305,13 +358,13 @@ function InviteModal({ tenantId, onClose, onSuccess }: InviteModalProps) {
             </>
           )}
         </div>
-        <div className="modal-footer">
+        <div className="modal-footer pt-2">
           <button className="btn btn-secondary" onClick={onClose}>
-            {done ? 'Tutup' : 'Batal'}
+            {tempPass ? 'Tutup' : 'Batal'}
           </button>
-          {!done && (
+          {!tempPass && (
             <button
-              className="btn btn-primary"
+              className="btn btn-primary shadow-lg shadow-blue-100"
               onClick={handleSubmit}
               disabled={loading}
             >

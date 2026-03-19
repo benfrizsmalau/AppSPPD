@@ -1,13 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import type { SPPD } from '../types/sppd';
-import { useNumbering } from './useNumbering';
 
 export const useSPPD = () => {
     const [sppds, setSppds] = useState<SPPD[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const { settings, resolveNumber } = useNumbering();
 
     const fetchSPPDs = useCallback(async () => {
         try {
@@ -96,14 +94,14 @@ export const useSPPD = () => {
         fetchSPPDs();
     }, [fetchSPPDs]);
 
-    const generateSPPDNumber = useCallback(async () => {
-        const { count } = await supabase
-            .from('sppd')
-            .select('*', { count: 'exact', head: true });
-
-        const sppdPattern = settings.find(s => s.jenis_dokumen === 'SPPD')?.format_pattern || '{num}/SPPD/BPPKAD/{year}';
-        return resolveNumber(sppdPattern, count || 0, 'BPPKAD');
-    }, [settings, resolveNumber]);
+    const generateSPPDNumber = useCallback(async (tenantId: string) => {
+        const { data, error } = await supabase.rpc('get_next_document_number', {
+            p_jenis: 'SPPD',
+            p_tenant_id: tenantId
+        });
+        if (error) throw error;
+        return data;
+    }, []);
 
     return {
         sppds,

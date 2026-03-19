@@ -43,7 +43,7 @@ import { toast } from 'sonner';
 import type { SPT, SPTPegawai, ApprovalLog, DocumentStatus } from '../types';
 
 // ─── Local extended types for joined data ─────────────────────────
-interface SPTDetail extends SPT {
+interface SPTDetail extends Omit<SPT, 'spt_pegawai'> {
   spt_pegawai?: (SPTPegawai & {
     pegawai?: {
       id: number;
@@ -142,9 +142,12 @@ export default function SPTDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { tenantId } = useAuth();
+  const { tenantId, hasRole } = useAuth();
 
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [komentar, setKomentar] = useState('');
   const [alasan, setAlasan] = useState('');
 
   // ── Data Fetching ──────────────────────────────────────────────
@@ -186,6 +189,86 @@ export default function SPTDetail() {
   });
 
   // ── Mutations ──────────────────────────────────────────────────
+  const approveMutation = useMutation({
+    mutationFn: async () => {
+      if (!tenantId || !spt) throw new Error('Data tidak lengkap');
+
+      // 1. Get next number if not currently numbered
+      let nomor = spt.nomor_spt;
+      if (!nomor) {
+        const { data: nextNo, error: noErr } = await supabase.rpc(
+          'get_next_document_number',
+          { p_tenant_id: tenantId, p_jenis: 'SPT' }
+        );
+        if (noErr) throw noErr;
+        nomor = nextNo as string;
+      }
+
+      // 2. Update SPT Status
+      const { error: updateErr } = await supabase
+        .from('spt')
+        .update({
+          status: 'Final' as DocumentStatus,
+          nomor_spt: nomor,
+          finalized_at: new Date().toISOString(),
+        })
+        .eq('id', id!);
+      if (updateErr) throw updateErr;
+
+      // 3. Log to approval_log
+      const { error: logErr } = await supabase.from('approval_log').insert({
+        tenant_id: tenantId,
+        dokumen_id: Number(id),
+        jenis_dokumen: 'SPT',
+        level: 1, // Simplified for now
+        approver_id: (await supabase.auth.getUser()).data.user?.id,
+        action: 'APPROVE',
+        komentar: komentar || 'Disetujui melalui sistem.',
+      });
+      if (logErr) throw logErr;
+    },
+    onSuccess: () => {
+      toast.success('SPT Berhasil Disetujui & Difinalisasi');
+      queryClient.invalidateQueries({ queryKey: ['spt'] });
+      queryClient.invalidateQueries({ queryKey: ['approval_log'] });
+      setShowApproveModal(false);
+      setKomentar('');
+    },
+    onError: (err: any) => toast.error('Gagal menyetujui: ' + err.message),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: async () => {
+      if (!tenantId) throw new Error('Tenant tidak ditemukan');
+
+      // 1. Update SPT Status back to Draft
+      const { error: updateErr } = await supabase
+        .from('spt')
+        .update({ status: 'Draft' as DocumentStatus })
+        .eq('id', id!);
+      if (updateErr) throw updateErr;
+
+      // 2. Log to approval_log
+      const { error: logErr } = await supabase.from('approval_log').insert({
+        tenant_id: tenantId,
+        dokumen_id: Number(id),
+        jenis_dokumen: 'SPT',
+        level: 1,
+        approver_id: (await supabase.auth.getUser()).data.user?.id,
+        action: 'REJECT',
+        komentar: komentar || 'Ditolak/revisi oleh Pejabat.',
+      });
+      if (logErr) throw logErr;
+    },
+    onSuccess: () => {
+      toast.info('SPT Ditolak (Kembali ke Draft)');
+      queryClient.invalidateQueries({ queryKey: ['spt'] });
+      queryClient.invalidateQueries({ queryKey: ['approval_log'] });
+      setShowRejectModal(false);
+      setKomentar('');
+    },
+    onError: (err: any) => toast.error('Gagal memproses penolakan: ' + err.message),
+  });
   const finalizeMutation = useMutation({
     mutationFn: async () => {
       if (!tenantId) throw new Error('Tenant tidak ditemukan');
@@ -335,10 +418,27 @@ export default function SPTDetail() {
 
         {/* ── Action Bar ──────────────────────────────────────── */}
         <div className="flex gap-2 flex-wrap items-start">
+          {spt.status === 'Menunggu Persetujuan' && hasRole(['Admin', 'Pejabat']) && (
+            <div className="flex gap-2 p-1 bg-amber-50 rounded-2xl border border-amber-100 shadow-sm animate-in fade-in slide-in-from-top-2">
+              <button
+                className="btn btn-success btn-sm"
+                onClick={() => setShowApproveModal(true)}
+              >
+                <CheckCircle size={14} /> Setujui SPT
+              </button>
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={() => setShowRejectModal(true)}
+              >
+                <RotateCcw size={14} /> Tolak/Revisi
+              </button>
+            </div>
+          )}
+
           {canEdit(spt.status) && (
             <button
               className="btn btn-secondary btn-sm"
-              onClick={() => navigate(`/spt/${id}/edit`)}
+              onClick={() => navigate(`/spt/edit/${id}`)}
             >
               <Edit size={14} /> Edit
             </button>
@@ -738,6 +838,87 @@ export default function SPTDetail() {
                 onClick={() => cancelMutation.mutate()}
               >
                 {cancelMutation.isPending ? 'Memproses...' : 'Batalkan SPT'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ── Approve Modal ────────────────────────────────────────── */}
+      {showApproveModal && (
+        <div className="modal-backdrop" onClick={() => setShowApproveModal(false)}>
+          <div className="modal-panel modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title flex items-center gap-2">
+                <CheckCircle className="text-emerald-500" size={18} />
+                Setujui Dokumen
+              </h2>
+            </div>
+            <div className="modal-body space-y-4">
+              <p className="text-sm text-slate-600">
+                Persetujuan ini akan secara otomatis menerbitkan <strong>Nomor SPT Resmi</strong> dan memfinalisasi dokumen.
+              </p>
+              <div className="form-group">
+                <label className="form-label text-xs">Catatan Opsional</label>
+                <textarea
+                  className="form-textarea"
+                  value={komentar}
+                  onChange={(e) => setKomentar(e.target.value)}
+                  placeholder="Contoh: Dokumen sesuai, silakan dilanjutkan."
+                  rows={2}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowApproveModal(false)}>
+                Batal
+              </button>
+              <button
+                className="btn btn-success"
+                disabled={approveMutation.isPending}
+                onClick={() => approveMutation.mutate()}
+              >
+                {approveMutation.isPending ? 'Memproses...' : 'Setujui & Terbitkan Nomor'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reject Modal ─────────────────────────────────────────── */}
+      {showRejectModal && (
+        <div className="modal-backdrop" onClick={() => setShowRejectModal(false)}>
+          <div className="modal-panel modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title flex items-center gap-2">
+                <RotateCcw className="text-rose-500" size={18} />
+                Tolak / Minta Revisi
+              </h2>
+            </div>
+            <div className="modal-body space-y-4">
+              <p className="text-sm text-slate-600">
+                Dokumen akan dikembalikan ke status <strong>Draft</strong> agar operator dapat melakukan perbaikan.
+              </p>
+              <div className="form-group">
+                <label className="form-label text-xs">Alasan Penolakan <span className="required-mark">*</span></label>
+                <textarea
+                  className="form-textarea"
+                  value={komentar}
+                  onChange={(e) => setKomentar(e.target.value)}
+                  placeholder="Jelaskan alasan penolakan atau bagian yang perlu direvisi..."
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setShowRejectModal(false)}>
+                Batal
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={!komentar.trim() || rejectMutation.isPending}
+                onClick={() => rejectMutation.mutate()}
+              >
+                {rejectMutation.isPending ? 'Memproses...' : 'Tolak & Kembalikan'}
               </button>
             </div>
           </div>
