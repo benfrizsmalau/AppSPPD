@@ -241,20 +241,35 @@ const PenandatanganModal: React.FC<PenandatanganModalProps> = ({ isOpen, onClose
   }));
 
   const handleSubmit = async () => {
-    if (!form.nama_lengkap || !form.nip || !form.jabatan) { toast.error('Nama, NIP, dan Jabatan wajib diisi.'); return; }
-    if (form.nip.length !== 18) { toast.error('NIP harus 18 karakter.'); return; }
+    if (!form.nama_lengkap.trim() || !form.nip.trim() || !form.jabatan.trim()) {
+      toast.error('Nama, NIP, dan Jabatan wajib diisi.');
+      return;
+    }
+    if (form.nip.length !== 18) { toast.error('NIP harus 18 digit.'); return; }
     setSaving(true);
-    const payload = {
-      ...form,
-      pangkat_id: form.pangkat_id || undefined,
-      golongan_id: form.golongan_id || undefined,
-      unit_kerja_id: form.unit_kerja_id ? Number(form.unit_kerja_id) : undefined,
-      periode_mulai: form.periode_mulai || undefined,
-      periode_selesai: form.periode_selesai || undefined,
-    };
-    await onSave(payload, ttdFile ?? undefined);
-    setSaving(false);
-    onClose();
+    try {
+      const payload: Partial<Penandatangan> = {
+        gelar_depan: form.gelar_depan || undefined,
+        nama_lengkap: form.nama_lengkap.trim(),
+        gelar_belakang: form.gelar_belakang || undefined,
+        nip: form.nip,
+        jabatan: form.jabatan.trim(),
+        pangkat_id: form.pangkat_id || undefined,
+        golongan_id: form.golongan_id || undefined,
+        unit_kerja_id: form.unit_kerja_id ? Number(form.unit_kerja_id) : undefined,
+        jenis_dokumen: form.jenis_dokumen,
+        ttd_digital_path: form.ttd_digital_path || undefined,
+        periode_mulai: form.periode_mulai || undefined,
+        periode_selesai: form.periode_selesai || undefined,
+        status_aktif: form.status_aktif,
+      };
+      await onSave(payload, ttdFile ?? undefined);
+      onClose();
+    } catch (err: unknown) {
+      toast.error((err instanceof Error ? err.message : null) || 'Gagal menyimpan penandatangan');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -647,15 +662,25 @@ const Settings: React.FC = () => {
 
   const saveTTDMut = useMutation({
     mutationFn: async ({ v, file, id }: { v: Partial<Penandatangan>; file?: File; id?: number }) => {
+      if (!tenantId) throw new Error('Tenant tidak ditemukan. Coba refresh halaman.');
+
       let ttd_digital_path = v.ttd_digital_path;
       if (file) {
         const ext = file.name.split('.').pop();
         const path = `${tenantId}/ttd_${Date.now()}.${ext}`;
-        await supabase.storage.from('signatures').upload(path, file, { upsert: true });
-        const { data: { publicUrl } } = supabase.storage.from('signatures').getPublicUrl(path);
-        ttd_digital_path = publicUrl;
+        const { error: uploadErr } = await supabase.storage
+          .from('signatures')
+          .upload(path, file, { upsert: true });
+        if (uploadErr) {
+          // Bucket belum dibuat — lanjut simpan tanpa gambar, tampilkan peringatan
+          toast.warning('Bucket "signatures" belum dibuat di Supabase Storage. Data disimpan tanpa gambar TTD.');
+        } else {
+          const { data: urlData } = supabase.storage.from('signatures').getPublicUrl(path);
+          ttd_digital_path = urlData.publicUrl;
+        }
       }
-      const payload = { ...v, ttd_digital_path, tenant_id: tenantId };
+
+      const payload = { ...v, ttd_digital_path: ttd_digital_path || null, tenant_id: tenantId };
       if (id) {
         const { error } = await supabase.from('penandatangan').update(payload).eq('id', id);
         if (error) throw error;
@@ -664,7 +689,10 @@ const Settings: React.FC = () => {
         if (error) throw error;
       }
     },
-    onSuccess: () => { toast.success('Data penandatangan disimpan.'); qc.invalidateQueries({ queryKey: ['penandatangan'] }); },
+    onSuccess: () => {
+      toast.success('Data penandatangan disimpan.');
+      qc.invalidateQueries({ queryKey: ['penandatangan'] });
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 

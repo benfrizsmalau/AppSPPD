@@ -1026,10 +1026,22 @@ ON CONFLICT DO NOTHING;
 -- ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS preferences JSONB DEFAULT '{}';
 
 -- =================================================================
--- MIGRATION: Storage bucket untuk avatar pengguna
--- Jalankan di Supabase SQL Editor (bagian Storage → New Bucket)
--- ATAU via SQL berikut (membutuhkan service_role key):
+-- MIGRATION: Storage buckets
+-- Jalankan di Supabase SQL Editor
 -- =================================================================
--- INSERT INTO storage.buckets (id, name, public)
--- VALUES ('avatars', 'avatars', true)
--- ON CONFLICT (id) DO NOTHING;
+
+-- Bucket untuk avatar pengguna (public)
+-- INSERT INTO storage.buckets (id, name, public) VALUES ('avatars', 'avatars', true) ON CONFLICT (id) DO NOTHING;
+
+-- Bucket untuk tanda tangan digital penandatangan (public agar bisa ditampilkan di dokumen)
+-- INSERT INTO storage.buckets (id, name, public) VALUES ('signatures', 'signatures', true) ON CONFLICT (id) DO NOTHING;
+
+-- Policy RLS storage: avatar
+-- CREATE POLICY "avatars_upload_own" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'avatars' AND (storage.foldername(name))[1] = auth.uid()::text);
+-- CREATE POLICY "avatars_update_own" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'avatars' AND (storage.foldername(name))[1] = auth.uid()::text);
+-- CREATE POLICY "avatars_public_read" ON storage.objects FOR SELECT TO public USING (bucket_id = 'avatars');
+
+-- Policy RLS storage: signatures (Admin & Operator bisa upload, semua bisa baca)
+-- CREATE POLICY "signatures_upload" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'signatures');
+-- CREATE POLICY "signatures_update" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'signatures');
+-- CREATE POLICY "signatures_public_read" ON storage.objects FOR SELECT TO public USING (bucket_id = 'signatures');
