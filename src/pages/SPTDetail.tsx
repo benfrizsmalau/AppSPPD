@@ -502,25 +502,32 @@ export default function SPTDetail() {
             {(spt.dasar_perintah?.length ?? 0) > 0 && (
               <div>
                 <p className="form-label mb-2">Dasar Perintah</p>
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Nomor</th>
-                        <th>Tanggal</th>
-                        <th>Perihal</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {spt.dasar_perintah.map((d, i) => (
-                        <tr key={d.id ?? i}>
-                          <td className="doc-number whitespace-nowrap">{d.nomor}</td>
-                          <td className="whitespace-nowrap">{formatDateIndonesian(d.tanggal)}</td>
-                          <td>{d.perihal}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="space-y-2">
+                  {spt.dasar_perintah.map((d, i) => {
+                    const jenis = d.jenis ?? 'surat';
+                    const badgeColor =
+                      jenis === 'surat'   ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                      jenis === 'lisan'   ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                            'bg-slate-50 text-slate-600 border-slate-200';
+                    const badgeLabel =
+                      jenis === 'surat'   ? 'Surat Resmi' :
+                      jenis === 'lisan'   ? 'Perintah Lisan' : 'Lainnya';
+                    return (
+                      <div key={d.id ?? i} className="flex items-start gap-3 p-3 rounded-xl border border-slate-100 bg-slate-50">
+                        <span className={`mt-0.5 flex-shrink-0 text-xs font-semibold px-2 py-0.5 rounded-md border ${badgeColor}`}>
+                          {badgeLabel}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          {jenis === 'surat' && d.nomor && (
+                            <p className="text-xs font-mono text-slate-500 mb-0.5">
+                              {d.nomor} &bull; {formatDateIndonesian(d.tanggal ?? '')}
+                            </p>
+                          )}
+                          <p className="text-sm text-slate-800">{d.perihal}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

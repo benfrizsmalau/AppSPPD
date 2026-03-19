@@ -130,11 +130,17 @@ const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
               <td style={{ verticalAlign: 'top' }}>
                 {Array.isArray(data.dasar_perintah) && data.dasar_perintah.length > 0 ? (
                   <ol style={{ margin: 0, paddingLeft: '18px' }}>
-                    {(data.dasar_perintah as DasarPerintah[]).map((d, i) => (
-                      <li key={i} style={{ marginBottom: '2px' }}>
-                        {d.nomor ? `${d.nomor} tanggal ${fmtDate(d.tanggal)} tentang ${d.perihal}` : d.perihal}
-                      </li>
-                    ))}
+                    {(data.dasar_perintah as DasarPerintah[]).map((d, i) => {
+                      let teks = d.perihal;
+                      if (d.jenis === 'surat' && d.nomor) {
+                        teks = `${d.nomor} tanggal ${fmtDate(d.tanggal ?? '')} tentang ${d.perihal}`;
+                      } else if (d.jenis === 'lisan') {
+                        teks = `Perintah Lisan: ${d.perihal}`;
+                      }
+                      return (
+                        <li key={i} style={{ marginBottom: '2px' }}>{teks}</li>
+                      );
+                    })}
                   </ol>
                 ) : (
                   <span>{String(data.dasar_perintah ?? '—')}</span>

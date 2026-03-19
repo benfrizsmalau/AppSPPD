@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -412,46 +412,53 @@ const SPPDForm: React.FC = () => {
   ] as const;
 
   return (
-    <div className="flex flex-col gap-6 max-w-screen-xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-4 bg-white rounded-2xl border border-slate-100 px-6 py-4 shadow-sm">
-        <button className="btn btn-ghost btn-icon" onClick={() => navigate('/sppd')}>
-          <ArrowLeft size={18} />
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 text-xs font-semibold text-blue-600 uppercase tracking-wide mb-0.5">
-            <span>SPPD</span>
-            <ChevronRight size={12} />
-            <span>{isEdit ? 'Edit' : 'Buat Baru'}</span>
-          </div>
-          <h1 className="text-xl font-bold text-slate-900 truncate">
-            {isEdit
-              ? `Edit SPPD${existingSPPD?.nomor_sppd ? ` — ${existingSPPD.nomor_sppd}` : ''}`
-              : 'Buat SPPD Baru'}
-          </h1>
-        </div>
-        <div className="flex items-center gap-2">
-          {canComplete && (
-            <button className="btn btn-success btn-sm" onClick={markCompleted}>
-              <CheckCircle2 size={15} /> Tandai Selesai
+    <div className="page-enter max-w-screen-xl mx-auto pt-8 px-4 pb-12">
+      {/* ── Header ──────────────────────────────────────────── */}
+      <div className="premium-header mb-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              className="btn bg-white/80 hover:bg-white text-slate-600 w-12 h-12 rounded-2xl shadow-sm border border-slate-200/50 flex items-center justify-center transition-all active:scale-95"
+              onClick={() => navigate('/sppd')}
+            >
+              <ArrowLeft size={20} />
             </button>
-          )}
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => onSubmit('Draft')}
-            disabled={saveMutation.isPending}
-          >
-            {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Simpan Draft
-          </button>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => onSubmit('Menunggu Persetujuan')}
-            disabled={saveMutation.isPending}
-          >
-            {saveMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <FileCheck size={14} />}
-            Finalisasi
-          </button>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">
+                <Link to="/sppd" className="hover:text-blue-500 transition-colors text-slate-400">Surat Perjalanan Dinas</Link>
+                <ChevronRight size={10} className="text-slate-300" />
+                <span className="text-blue-500">{isEdit ? `Dokumen #${id}` : 'Proses Baru'}</span>
+              </div>
+              <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none">
+                {isEdit ? 'Edit SPPD' : 'Buat SPPD Baru'}
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {canComplete && (
+              <button className="btn btn-emerald-600 bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-500/20 px-6" onClick={markCompleted}>
+                <CheckCircle2 size={16} /> Tandai Selesai
+              </button>
+            )}
+            <button
+              className="btn btn-secondary px-6"
+              onClick={() => onSubmit('Draft')}
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+              Draft
+            </button>
+            <button
+              className="btn btn-primary px-8 shadow-blue-500/25"
+              onClick={() => onSubmit('Menunggu Persetujuan')}
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <FileCheck size={16} />}
+              Finalisasi
+            </button>
+          </div>
         </div>
       </div>
 
@@ -474,16 +481,23 @@ const SPPDForm: React.FC = () => {
         {/* LEFT — Form */}
         <div className="flex flex-col gap-5">
           {/* Section Nav */}
-          <div className="tab-list">
-            {SECTIONS.map(s => (
-              <button
-                key={s.id}
-                type="button"
-                className={`tab-item ${activeSection === s.id ? 'active' : ''}`}
-                onClick={() => setActiveSection(s.id)}
-              >
-                {s.label}
-              </button>
+          <div className="flex items-center justify-between gap-2 mb-2 bg-slate-50/50 p-1.5 rounded-2xl border border-slate-100/50">
+            {SECTIONS.map((s, i) => (
+              <React.Fragment key={s.id}>
+                <button
+                  type="button"
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl transition-all duration-300 ${activeSection === s.id ? 'bg-white shadow-md text-blue-600' : 'text-slate-400 hover:bg-white/50'}`}
+                  onClick={() => setActiveSection(s.id)}
+                >
+                  <div className={`w-6 h-6 rounded-lg flex items-center justify-center font-bold text-[10px] ${activeSection === s.id ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                    {s.id}
+                  </div>
+                  <span className="text-[11px] font-black uppercase tracking-wider hidden lg:block">{s.label}</span>
+                </button>
+                {i < SECTIONS.length - 1 && (
+                  <ChevronRight size={12} className="text-slate-300 hidden md:block" />
+                )}
+              </React.Fragment>
             ))}
           </div>
 

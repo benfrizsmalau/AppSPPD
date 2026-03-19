@@ -11,7 +11,7 @@ import {
   Building2, Hash, UserRound, DollarSign, Route,
   Plus, Edit2, Trash2, Upload, X, AlertTriangle, RefreshCw,
   CheckCircle, Eye, ToggleLeft, ToggleRight, Download, Loader2,
-  FileSpreadsheet,
+  FileSpreadsheet, Settings as SettingsIcon,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -20,7 +20,7 @@ const ROMAN = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'];
 function toRoman(n: number) { return ROMAN[n - 1] ?? String(n); }
 
 // ─── Number preview builder ───────────────────────────────────────────────────
-function buildPreview(pattern: string, digits: number, org: string) {
+function buildPreview(pattern: string, digits: number, org: string, jenis: string = 'SPT') {
   const pad = String(1).padStart(digits, '0');
   const now = new Date();
   return pattern
@@ -29,7 +29,7 @@ function buildPreview(pattern: string, digits: number, org: string) {
     .replace('{month}', String(now.getMonth() + 1).padStart(2, '0'))
     .replace('{month_roman}', toRoman(now.getMonth() + 1))
     .replace('{org}', org || 'ORG')
-    .replace('{jenis}', 'SPT');
+    .replace('{jenis}', jenis);
 }
 
 // ─── Logo Upload Area ─────────────────────────────────────────────────────────
@@ -240,7 +240,15 @@ const PenandatanganModal: React.FC<PenandatanganModalProps> = ({ isOpen, onClose
     if (!form.nama_lengkap || !form.nip || !form.jabatan) { toast.error('Nama, NIP, dan Jabatan wajib diisi.'); return; }
     if (form.nip.length !== 18) { toast.error('NIP harus 18 karakter.'); return; }
     setSaving(true);
-    await onSave({ ...form, pangkat_id: form.pangkat_id || undefined, golongan_id: form.golongan_id || undefined, unit_kerja_id: form.unit_kerja_id || undefined }, ttdFile ?? undefined);
+    const payload = {
+      ...form,
+      pangkat_id: form.pangkat_id || undefined,
+      golongan_id: form.golongan_id || undefined,
+      unit_kerja_id: form.unit_kerja_id ? Number(form.unit_kerja_id) : undefined,
+      periode_mulai: form.periode_mulai || undefined,
+      periode_selesai: form.periode_selesai || undefined,
+    };
+    await onSave(payload, ttdFile ?? undefined);
     setSaving(false);
     onClose();
   };
@@ -548,7 +556,7 @@ const Settings: React.FC = () => {
   const renderPenomoranCard = (jenis: 'SPT' | 'SPPD') => {
     const local = penomoranLocal[jenis] ?? { format_pattern: `{num}/{jenis}/{org}/{month_roman}/{year}`, digit_count: 3, reset_annually: true, kode_organisasi: '' };
     const existing = settingPenomoran.find(s => s.jenis_dokumen === jenis);
-    const preview = buildPreview(local.format_pattern, local.digit_count, local.kode_organisasi);
+    const preview = buildPreview(local.format_pattern, local.digit_count, local.kode_organisasi, jenis);
     return (
       <div className="card" key={jenis}>
         <div className="card-header">
@@ -722,10 +730,15 @@ const Settings: React.FC = () => {
 
   return (
     <div className="page-container">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Pengaturan</h1>
-          <p className="page-subtitle">Kelola konfigurasi instansi, penomoran, dan referensi sistem.</p>
+      <div className="premium-header">
+        <div className="flex items-center gap-4 mb-3">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-slate-700 flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-4 ring-white/50">
+            <SettingsIcon size={28} className="text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-black tracking-tight">Pengaturan</h1>
+            <p className="max-w-md font-medium">Kelola konfigurasi instansi, penomoran, dan referensi sistem.</p>
+          </div>
         </div>
       </div>
 

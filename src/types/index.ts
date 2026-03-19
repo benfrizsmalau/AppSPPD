@@ -169,11 +169,14 @@ export interface SettingPenomoran {
   updated_at: string;
 }
 
+export type JenisDasarPerintah = 'surat' | 'lisan' | 'lainnya';
+
 export interface DasarPerintah {
   id: string;
-  nomor: string;
-  tanggal: string;
-  perihal: string;
+  jenis: JenisDasarPerintah; // 'surat' | 'lisan' | 'lainnya'
+  nomor?: string;            // hanya untuk jenis 'surat'
+  tanggal?: string;          // hanya untuk jenis 'surat'
+  perihal: string;           // wajib untuk semua jenis (deskripsi/perihal/keterangan)
 }
 
 export interface SPT {

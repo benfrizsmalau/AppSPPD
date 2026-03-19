@@ -43,21 +43,22 @@ const STATUS_FILTERS: { label: string; value: StatusFilter }[] = [
   { label: 'Dibatalkan', value: 'Cancelled' },
 ];
 
-const STATUS_CLASS: Record<DocumentStatus, string> = {
-  Draft: 'status-draft',
-  'Menunggu Persetujuan': 'status-pending',
-  Final: 'status-final',
-  Printed: 'status-printed',
-  Completed: 'status-completed',
-  Cancelled: 'status-cancelled',
-  Expired: 'status-expired',
-};
-
 // ─── Sub-components ───────────────────────────────────────────────
 
-const StatusBadge: React.FC<{ status: DocumentStatus }> = ({ status }) => (
-  <span className={STATUS_CLASS[status] ?? 'badge badge-slate'}>{status}</span>
-);
+const StatusBadge: React.FC<{ status: DocumentStatus }> = ({ status }) => {
+  const glowClass = status === 'Final' || status === 'Printed' || status === 'Completed' 
+    ? 'status-final-glow' 
+    : status === 'Menunggu Persetujuan' 
+    ? 'status-pending-glow' 
+    : 'status-draft-glow';
+    
+  return (
+    <span className={`badge-glow ${glowClass}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-70" />
+      {status}
+    </span>
+  );
+};
 
 const SkeletonRow: React.FC = () => (
   <tr>
@@ -368,14 +369,57 @@ const SPTList: React.FC = () => {
     <div className="page-enter flex flex-col gap-5">
 
       {/* ── Page Header ─────────────────────────────────────── */}
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Surat Perintah Tugas</h1>
-          <p className="page-subtitle">Kelola dan pantau seluruh dokumen SPT instansi.</p>
+      <div className="premium-header">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-4 mb-3">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 ring-4 ring-white/50">
+                <FileText size={28} className="text-white" />
+              </div>
+              <h1 className="text-3xl font-black tracking-tight">Surat Perintah Tugas</h1>
+            </div>
+            <p className="max-w-md font-medium">
+              Manajemen dokumen penugasan pegawai dengan sistem penomoran otomatis dan integrasi real-time.
+            </p>
+          </div>
+          <Link 
+            to="/spt/new" 
+            className="btn btn-primary h-14 px-8 rounded-2xl shadow-xl shadow-blue-500/25 flex items-center gap-3 group transition-all"
+          >
+            <div className="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center group-hover:rotate-90 transition-transform duration-300">
+              <Plus size={20} className="text-white" />
+            </div>
+            <span className="font-bold text-lg">Tambah SPT</span>
+          </Link>
         </div>
-        <Link to="/spt/new" className="btn btn-primary">
-          <Plus size={17} /> Tambah SPT
-        </Link>
+      </div>
+
+      {/* ── Quick Stats ──────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <QuickStatCard 
+          label="Total SPT" 
+          value={statusCounts.All || 0} 
+          icon={<FileText size={18} />} 
+          color="blue" 
+        />
+        <QuickStatCard 
+          label="Menunggu" 
+          value={statusCounts['Menunggu Persetujuan'] || 0} 
+          icon={<AlertTriangle size={18} />} 
+          color="amber" 
+        />
+        <QuickStatCard 
+          label="Selesai" 
+          value={(statusCounts.Final || 0) + (statusCounts.Printed || 0)} 
+          icon={<RefreshCw size={18} />} 
+          color="emerald" 
+        />
+        <QuickStatCard 
+          label="Draft" 
+          value={statusCounts.Draft || 0} 
+          icon={<Edit2 size={18} />} 
+          color="slate" 
+        />
       </div>
 
       {/* ── Status Filter Chips ──────────────────────────────── */}
@@ -398,57 +442,56 @@ const SPTList: React.FC = () => {
       </div>
 
       {/* ── Search & Date Filters ────────────────────────────── */}
-      <div className="card card-body flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-        <div className="search-wrap flex-1 min-w-0">
-          <Search size={16} className="search-icon" />
+      <div className="bg-white/50 backdrop-blur-sm border border-slate-200 rounded-2xl p-4 flex flex-col lg:flex-row gap-4 items-start lg:items-center shadow-sm">
+        <div className="search-wrap flex-1 min-w-0 bg-white shadow-inner border-slate-100 h-11">
+          <Search size={18} className="search-icon text-slate-400" />
           <input
             type="text"
-            className="search-input"
-            placeholder="Cari nomor SPT, tujuan kegiatan, tempat penetapan…"
+            className="search-input text-sm h-full"
+            placeholder="Cari nomor SPT, tujuan atau lokasi…"
             value={searchInput}
             onChange={e => handleSearchChange(e.target.value)}
           />
-          {searchInput && (
-            <button
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              onClick={() => { setSearchInput(''); setDebouncedSearch(''); setPage(1); }}
-            >
-              <X size={14} />
-            </button>
-          )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Calendar size={15} className="text-slate-400" />
-          <input
-            type="date"
-            className="form-input text-xs py-2"
-            value={startDate}
-            onChange={e => { setStartDate(e.target.value); setPage(1); }}
-            title="Dari tanggal"
-          />
-          <span className="text-slate-400 text-xs">s/d</span>
-          <input
-            type="date"
-            className="form-input text-xs py-2"
-            value={endDate}
-            onChange={e => { setEndDate(e.target.value); setPage(1); }}
-            title="Sampai tanggal"
-            min={startDate}
-          />
-          {(startDate || endDate) && (
-            <button
-              className="btn btn-ghost btn-sm p-1.5"
-              onClick={() => { setStartDate(''); setEndDate(''); setPage(1); }}
-              title="Reset tanggal"
-            >
-              <X size={14} />
-            </button>
-          )}
+        
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-white px-3 h-11 rounded-xl border border-slate-100 shadow-inner">
+            <Calendar size={16} className="text-slate-400" />
+            <input
+              type="date"
+              className="bg-transparent border-none focus:ring-0 text-xs font-semibold text-slate-700 w-32"
+              value={startDate}
+              onChange={e => { setStartDate(e.target.value); setPage(1); }}
+            />
+            <span className="text-slate-300">—</span>
+            <input
+              type="date"
+              className="bg-transparent border-none focus:ring-0 text-xs font-semibold text-slate-700 w-32"
+              value={endDate}
+              onChange={e => { setEndDate(e.target.value); setPage(1); }}
+            />
+          </div>
+          
+          <div className="h-8 w-px bg-slate-200 hidden sm:block mx-1" />
+          
+          <div className="flex gap-1 overflow-x-auto pb-1 sm:pb-0 no-scrollbar">
+            {STATUS_FILTERS.slice(0, 4).map(f => (
+              <button
+                key={f.value}
+                className={`px-4 h-9 rounded-xl text-xs font-bold transition-all
+                  ${statusFilter === f.value 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' 
+                    : 'bg-white text-slate-600 border border-slate-100 hover:border-blue-200'}`}
+                onClick={() => handleStatusFilter(f.value)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* ── Table ───────────────────────────────────────────── */}
-      <div className="table-wrap">
+      <div className="premium-table-wrap">
         <table className="data-table">
           <thead>
             <tr>
@@ -645,5 +688,38 @@ function computePageNumber(
   }
   return pages[index] ?? null;
 }
+
+const QuickStatCard: React.FC<{ 
+  label: string; 
+  value: number; 
+  icon: React.ReactNode; 
+  color: string 
+}> = ({ label, value, icon, color }) => {
+  const colorMap: Record<string, string> = {
+    blue: 'from-blue-500/20 to-indigo-500/5 text-blue-700 border-blue-100 shadow-blue-500/5',
+    amber: 'from-amber-500/20 to-orange-500/5 text-amber-700 border-amber-100 shadow-amber-500/5',
+    emerald: 'from-emerald-500/20 to-teal-500/5 text-emerald-700 border-emerald-100 shadow-emerald-500/5',
+    slate: 'from-slate-500/20 to-slate-500/5 text-slate-700 border-slate-200 shadow-slate-500/5',
+  };
+  
+  const iconColorMap: Record<string, string> = {
+    blue: 'bg-blue-600 shadow-blue-500/40',
+    amber: 'bg-amber-600 shadow-amber-500/40',
+    emerald: 'bg-emerald-600 shadow-emerald-500/40',
+    slate: 'bg-slate-600 shadow-slate-500/40',
+  };
+  
+  return (
+    <div className={`p-5 rounded-[1.5rem] border bg-gradient-to-br ${colorMap[color]} flex items-center gap-5 bg-white shadow-xl transition-all hover:scale-[1.03] hover:shadow-2xl`}>
+      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${iconColorMap[color]} text-white shadow-lg`}>
+        {icon}
+      </div>
+      <div>
+        <p className="text-[11px] font-black uppercase tracking-[0.1em] opacity-50 mb-0.5">{label}</p>
+        <p className="text-2xl font-black tracking-tight">{value}</p>
+      </div>
+    </div>
+  );
+};
 
 export default SPTList;

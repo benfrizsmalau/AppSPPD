@@ -65,6 +65,7 @@ import type {
   Pegawai,
   MataAnggaran,
   DasarPerintah,
+  JenisDasarPerintah,
 } from '../types';
 
 // =================================================================
@@ -72,9 +73,20 @@ import type {
 // =================================================================
 const dasarPerintahSchema = z.object({
   id: z.string(),
-  nomor: z.string().min(1, 'Nomor dasar wajib diisi'),
-  tanggal: z.string().min(1, 'Tanggal dasar wajib diisi'),
-  perihal: z.string().min(1, 'Perihal wajib diisi'),
+  jenis: z.enum(['surat', 'lisan', 'lainnya']),
+  // nomor & tanggal hanya wajib saat jenis = 'surat'
+  nomor: z.string().optional(),
+  tanggal: z.string().optional(),
+  perihal: z.string().min(1, 'Perihal / keterangan wajib diisi'),
+}).superRefine((val, ctx) => {
+  if (val.jenis === 'surat') {
+    if (!val.nomor || val.nomor.trim() === '') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['nomor'], message: 'Nomor surat wajib diisi' });
+    }
+    if (!val.tanggal || val.tanggal.trim() === '') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['tanggal'], message: 'Tanggal surat wajib diisi' });
+    }
+  }
 });
 
 const sptSchema = z.object({
@@ -122,7 +134,7 @@ interface StepperProps {
 }
 
 const Stepper: React.FC<StepperProps> = ({ current, completedSteps, onChange }) => (
-  <div className="stepper mb-8">
+  <div className="flex items-center justify-between gap-4 mb-10 bg-slate-50/50 p-2 rounded-2xl border border-slate-100/50">
     {STEPS.map((s, i) => {
       const done = completedSteps.has(s.step);
       const active = current === s.step;
@@ -130,19 +142,19 @@ const Stepper: React.FC<StepperProps> = ({ current, completedSteps, onChange }) 
         <React.Fragment key={s.step}>
           <button
             type="button"
-            className="flex items-center gap-2 group"
+            className={`flex-1 flex items-center gap-3 p-3 rounded-xl transition-all ${active ? 'bg-white shadow-md ring-1 ring-blue-500/10' : 'hover:bg-white/50'}`}
             onClick={() => onChange(s.step)}
           >
-            <div className={`step-dot ${done ? 'done' : active ? 'active' : 'todo'}`}>
-              {done ? <CheckCircle size={14} /> : s.step}
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm transition-all duration-300 ${done ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30' : active ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' : 'bg-slate-200 text-slate-500'}`}>
+              {done ? <CheckCircle size={16} /> : s.step}
             </div>
-            <span className={`text-xs font-semibold hidden sm:block transition-colors
-              ${active ? 'text-blue-600' : done ? 'text-emerald-600' : 'text-slate-400'}`}>
-              {s.label}
-            </span>
+            <div className="text-left hidden md:block">
+              <p className={`text-[10px] font-black uppercase tracking-widest leading-none mb-1 ${active ? 'text-blue-600' : 'text-slate-400'}`}>Tahap {s.step}</p>
+              <p className={`text-sm font-bold leading-none ${active ? 'text-slate-900' : 'text-slate-500'}`}>{s.label}</p>
+            </div>
           </button>
           {i < STEPS.length - 1 && (
-            <div className={`step-line ${done ? 'done' : ''}`} />
+            <ChevronRight size={16} className="text-slate-300" />
           )}
         </React.Fragment>
       );
@@ -161,6 +173,12 @@ interface SortableDasarProps {
   errors?: Partial<Record<keyof DasarPerintah, { message?: string }>>;
   canRemove: boolean;
 }
+
+const JENIS_OPTIONS: { value: JenisDasarPerintah; label: string; desc: string; color: string }[] = [
+  { value: 'surat',   label: 'Surat Resmi',     desc: 'Ada nomor & tanggal surat', color: 'bg-blue-50 border-blue-300 text-blue-700' },
+  { value: 'lisan',   label: 'Perintah Lisan',  desc: 'Tanpa dokumen tertulis',     color: 'bg-amber-50 border-amber-300 text-amber-700' },
+  { value: 'lainnya', label: 'Lainnya',          desc: 'Instruksi / disposisi dll',  color: 'bg-slate-50 border-slate-300 text-slate-600' },
+];
 
 const SortableDasarItem: React.FC<SortableDasarProps> = ({
   item, index, onUpdate, onRemove, errors, canRemove,
@@ -196,37 +214,79 @@ const SortableDasarItem: React.FC<SortableDasarProps> = ({
         <GripVertical size={16} />
       </button>
 
-      <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
-        <div className="form-group">
-          <label className="form-label text-xs">Nomor <span className="required-mark">*</span></label>
-          <input
-            className={`form-input text-sm ${errors?.nomor ? 'is-error' : ''}`}
-            placeholder="Nomor surat"
-            value={item.nomor}
-            onChange={e => onUpdate(index, 'nomor', e.target.value)}
-          />
-          {errors?.nomor && <p className="form-error">{errors.nomor.message}</p>}
+      <div className="flex-1 space-y-2">
+        {/* ── Pilih Jenis ── */}
+        <div className="flex gap-2 flex-wrap">
+          {JENIS_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onUpdate(index, 'jenis', opt.value)}
+              title={opt.desc}
+              className={`px-3 py-1 rounded-lg border text-xs font-semibold transition-all ${
+                item.jenis === opt.value
+                  ? opt.color + ' ring-2 ring-offset-1 ring-current'
+                  : 'bg-white border-slate-200 text-slate-400 hover:border-slate-300'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
-        <div className="form-group">
-          <label className="form-label text-xs">Tanggal <span className="required-mark">*</span></label>
-          <input
-            type="date"
-            className={`form-input text-sm ${errors?.tanggal ? 'is-error' : ''}`}
-            value={item.tanggal}
-            onChange={e => onUpdate(index, 'tanggal', e.target.value)}
-          />
-          {errors?.tanggal && <p className="form-error">{errors.tanggal.message}</p>}
-        </div>
-        <div className="form-group">
-          <label className="form-label text-xs">Perihal <span className="required-mark">*</span></label>
-          <input
-            className={`form-input text-sm ${errors?.perihal ? 'is-error' : ''}`}
-            placeholder="Perihal surat"
-            value={item.perihal}
-            onChange={e => onUpdate(index, 'perihal', e.target.value)}
-          />
-          {errors?.perihal && <p className="form-error">{errors.perihal.message}</p>}
-        </div>
+
+        {/* ── Fields kondisional ── */}
+        {item.jenis === 'surat' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="form-group">
+              <label className="form-label text-xs">Nomor Surat <span className="required-mark">*</span></label>
+              <input
+                className={`form-input text-sm ${errors?.nomor ? 'is-error' : ''}`}
+                placeholder="cth. 800/123/DINAS/2025"
+                value={item.nomor ?? ''}
+                onChange={e => onUpdate(index, 'nomor', e.target.value)}
+              />
+              {errors?.nomor && <p className="form-error">{errors.nomor.message}</p>}
+            </div>
+            <div className="form-group">
+              <label className="form-label text-xs">Tanggal <span className="required-mark">*</span></label>
+              <input
+                type="date"
+                className={`form-input text-sm ${errors?.tanggal ? 'is-error' : ''}`}
+                value={item.tanggal ?? ''}
+                onChange={e => onUpdate(index, 'tanggal', e.target.value)}
+              />
+              {errors?.tanggal && <p className="form-error">{errors.tanggal.message}</p>}
+            </div>
+            <div className="form-group">
+              <label className="form-label text-xs">Perihal <span className="required-mark">*</span></label>
+              <input
+                className={`form-input text-sm ${errors?.perihal ? 'is-error' : ''}`}
+                placeholder="Perihal surat"
+                value={item.perihal}
+                onChange={e => onUpdate(index, 'perihal', e.target.value)}
+              />
+              {errors?.perihal && <p className="form-error">{errors.perihal.message}</p>}
+            </div>
+          </div>
+        ) : (
+          <div className="form-group">
+            <label className="form-label text-xs">
+              {item.jenis === 'lisan' ? 'Keterangan Perintah Lisan' : 'Keterangan'}{' '}
+              <span className="required-mark">*</span>
+            </label>
+            <input
+              className={`form-input text-sm ${errors?.perihal ? 'is-error' : ''}`}
+              placeholder={
+                item.jenis === 'lisan'
+                  ? 'cth. Perintah lisan Kepala Dinas pada rapat tanggal ...'
+                  : 'cth. Disposisi Sekretaris Daerah No. ...'
+              }
+              value={item.perihal}
+              onChange={e => onUpdate(index, 'perihal', e.target.value)}
+            />
+            {errors?.perihal && <p className="form-error">{errors.perihal.message}</p>}
+          </div>
+        )}
       </div>
 
       {canRemove && (
@@ -551,7 +611,7 @@ const SPTForm: React.FC = () => {
     tempat_penetapan: '',
     instansi_id: 0,
     penandatangan_id: 0,
-    dasar_perintah: [{ id: crypto.randomUUID(), nomor: '', tanggal: '', perihal: '' }],
+    dasar_perintah: [{ id: crypto.randomUUID(), jenis: 'surat' as JenisDasarPerintah, nomor: '', tanggal: '', perihal: '' }],
     tujuan_kegiatan: [''],
     lama_kegiatan: 1,
     pembebanan_anggaran: '',
@@ -598,11 +658,12 @@ const SPTForm: React.FC = () => {
       const dasarPerintah: DasarPerintah[] = Array.isArray(existingSPT.dasar_perintah)
         ? existingSPT.dasar_perintah.map(d => ({
             id: (d as DasarPerintah).id ?? crypto.randomUUID(),
+            jenis: (d as DasarPerintah).jenis ?? 'surat',
             nomor: (d as DasarPerintah).nomor ?? '',
             tanggal: (d as DasarPerintah).tanggal ?? '',
             perihal: (d as DasarPerintah).perihal ?? '',
           }))
-        : [{ id: crypto.randomUUID(), nomor: '', tanggal: '', perihal: '' }];
+        : [{ id: crypto.randomUUID(), jenis: 'surat' as JenisDasarPerintah, nomor: '', tanggal: '', perihal: '' }];
 
       reset({
         tanggal_penetapan: existingSPT.tanggal_penetapan,
@@ -843,13 +904,13 @@ const SPTForm: React.FC = () => {
   };
 
   // ── Derived values ───────────────────────────────────────────
-  const selectedInstansi = instansiList.find(i => i.id === watchedValues.instansi_id);
-  const selectedPenandatangan = penandatanganList.find(
+  const selectedInstansi = (instansiList ?? []).find(i => i.id === watchedValues.instansi_id);
+  const selectedPenandatangan = (penandatanganList ?? []).find(
     p => p.id === watchedValues.penandatangan_id
   );
 
   // Filter penandatangan to SPT-compatible only
-  const sptPenandatangan = penandatanganList.filter(
+  const sptPenandatangan = (penandatanganList ?? []).filter(
     p => !p.jenis_dokumen || p.jenis_dokumen.includes('SPT')
   );
 
@@ -877,74 +938,70 @@ const SPTForm: React.FC = () => {
 
   // ── Render ────────────────────────────────────────────────────
   return (
-    <div className="page-enter max-w-screen-xl mx-auto">
+    <div className="page-enter max-w-screen-xl mx-auto pt-8 px-4 pb-12">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex items-center gap-4 mb-6">
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm p-2"
-          onClick={() => navigate('/spt')}
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <div className="flex-1">
-          <div className="flex items-center gap-2 text-xs text-slate-400 mb-0.5">
-            <Link to="/spt" className="hover:text-blue-600">SPT</Link>
-            <ChevronRight size={12} />
-            <span className="text-slate-600">{isEdit ? `Edit SPT #${id}` : 'Buat SPT Baru'}</span>
+      <div className="premium-header mb-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              className="btn bg-white/80 hover:bg-white text-slate-600 w-12 h-12 rounded-2xl shadow-sm border border-slate-200/50 flex items-center justify-center transition-all active:scale-95"
+              onClick={() => navigate('/spt')}
+            >
+              <ArrowLeft size={20} />
+            </button>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">
+                <Link to="/spt" className="hover:text-blue-500 transition-colors">Surat Perintah Tugas</Link>
+                <ChevronRight size={10} className="text-slate-300" />
+                <span className="text-blue-500">{isEdit ? `Dokumen #${id}` : 'Proses Baru'}</span>
+              </div>
+              <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none">
+                {isEdit ? 'Edit Surat Perintah Tugas' : 'Buat Surat Perintah Tugas'}
+              </h1>
+            </div>
           </div>
-          <h1 className="page-title">{isEdit ? 'Edit Surat Perintah Tugas' : 'Buat Surat Perintah Tugas'}</h1>
-        </div>
 
-        {/* Auto-save indicator */}
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
-          {autoSaveStatus === 'saving' && (
-            <>
-              <Loader2 size={12} className="animate-spin text-blue-400" />
-              <span>Menyimpan…</span>
-            </>
-          )}
-          {autoSaveStatus === 'saved' && isDirty && (
-            <>
-              <CheckCircle size={12} className="text-emerald-400" />
-              <span className="text-emerald-500">Tersimpan otomatis</span>
-            </>
-          )}
-          {autoSaveStatus === 'unsaved' && (
-            <>
-              <Clock size={12} className="text-amber-400" />
-              <span className="text-amber-500">Belum disimpan</span>
-            </>
-          )}
-        </div>
-
-        {/* Action buttons */}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={handleSubmit(handleSaveDraft)}
-            disabled={saveMutation.isPending}
-          >
-            {saveMutation.isPending && saveMutation.variables?.status === 'Draft'
-              ? <Loader2 size={15} className="animate-spin" />
-              : <Save size={15} />
-            }
-            Simpan Draft
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleSubmit(handleFinalize)}
-            disabled={saveMutation.isPending}
-          >
-            {saveMutation.isPending && saveMutation.variables?.status === 'Final'
-              ? <Loader2 size={15} className="animate-spin" />
-              : <CheckCircle size={15} />
-            }
-            Finalisasi
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col items-end mr-2 hidden sm:flex">
+              <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                {autoSaveStatus === 'saving' ? (
+                  <><Loader2 size={10} className="animate-spin text-blue-400" /> Menyimpan...</>
+                ) : autoSaveStatus === 'saved' ? (
+                  <><CheckCircle size={10} className="text-emerald-500" /> Tersimpan Otomatis</>
+                ) : (
+                  <><Clock size={10} className="text-amber-500" /> Belum Disimpan</>
+                )}
+              </div>
+              <p className="text-[9px] text-slate-300 mt-0.5">Sinkronisasi Real-time Aktif</p>
+            </div>
+            
+            <button
+              type="button"
+              className="btn btn-secondary px-6"
+              onClick={handleSubmit(handleSaveDraft)}
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending && saveMutation.variables?.status === 'Draft'
+                ? <Loader2 size={16} className="animate-spin" />
+                : <Save size={16} />
+              }
+              Draft
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary px-8 shadow-blue-500/25"
+              onClick={handleSubmit(handleFinalize)}
+              disabled={saveMutation.isPending}
+            >
+              {saveMutation.isPending && saveMutation.variables?.status === 'Final'
+                ? <Loader2 size={16} className="animate-spin" />
+                : <CheckCircle size={16} />
+              }
+              Finalisasi
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1115,7 +1172,7 @@ const SPTForm: React.FC = () => {
                   className="w-full mt-3 py-2.5 border-2 border-dashed border-slate-200 rounded-xl
                              text-sm font-semibold text-slate-400 hover:border-blue-400 hover:text-blue-500
                              hover:bg-blue-50 transition-colors flex items-center justify-center gap-2"
-                  onClick={() => appendDasar({ id: crypto.randomUUID(), nomor: '', tanggal: '', perihal: '' })}
+                  onClick={() => appendDasar({ id: crypto.randomUUID(), jenis: 'surat' as JenisDasarPerintah, nomor: '', tanggal: '', perihal: '' })}
                 >
                   <Plus size={15} /> Tambah Dasar Perintah
                 </button>
