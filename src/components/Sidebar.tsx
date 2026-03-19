@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Bell,
   LogOut,
+  CircleUserRound,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
@@ -86,6 +87,12 @@ const NAV_GROUPS: NavGroup[] = [
       { label: 'Konfigurasi', path: '/settings', icon: <Settings size={20} />, roles: ['Admin', 'Operator'] },
       { label: 'Manajemen User', path: '/settings/users', icon: <UserCog size={20} />, roles: ['Admin'] },
       { label: 'Audit Trail', path: '/settings/audit', icon: <Shield size={20} />, roles: ['Admin'] },
+    ],
+  },
+  {
+    groupLabel: 'Akun',
+    items: [
+      { label: 'Profil Saya', path: '/profil', icon: <CircleUserRound size={20} /> },
     ],
   },
 ];
@@ -200,8 +207,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
           <div className="p-4 border-t border-slate-800/50 bg-slate-900/50">
             <div className="space-y-4">
               {profile && (
-                <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
-                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center text-white font-bold text-sm border border-white/5 shadow-inner">
+                <NavLink
+                  to="/profil"
+                  className={`flex items-center gap-3 rounded-xl px-1 py-1 hover:bg-slate-800/60 transition-all group ${collapsed ? 'justify-center' : ''}`}
+                  title="Profil Saya"
+                >
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center text-white font-bold text-sm border border-white/5 shadow-inner group-hover:border-blue-500/30 transition-all">
                     {getInitials(profile.nama_lengkap)}
                   </div>
                   {!collapsed && (
@@ -210,7 +221,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
                       <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">{profile.role}</p>
                     </div>
                   )}
-                </div>
+                </NavLink>
               )}
               <button
                 onClick={handleSignOut}
