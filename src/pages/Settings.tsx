@@ -241,11 +241,17 @@ const PenandatanganModal: React.FC<PenandatanganModalProps> = ({ isOpen, onClose
   }));
 
   const handleSubmit = async () => {
-    if (!form.nama_lengkap.trim() || !form.nip.trim() || !form.jabatan.trim()) {
-      toast.error('Nama, NIP, dan Jabatan wajib diisi.');
+    // Validasi dasar: NIP bersifat opsional untuk pejabat politik/Bupati
+    if (!form.nama_lengkap.trim() || !form.jabatan.trim()) {
+      toast.error('Nama Lengkap dan Jabatan wajib diisi.');
       return;
     }
-    if (form.nip && form.nip.length !== 18) { toast.error('NIP harus 18 digit (atau kosongkan untuk pejabat politik).'); return; }
+
+    // Validasi NIP jika diisi
+    if (form.nip && form.nip.length > 0 && form.nip.length !== 18) {
+      toast.error('NIP harus 18 digit. Jika Bupati/pejabat politik, kosongkan saja.');
+      return;
+    }
     setSaving(true);
     try {
       const payload: Partial<Penandatangan> = {

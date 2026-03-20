@@ -79,7 +79,11 @@ const Login: React.FC = () => {
       {/* Left brand panel */}
       <div
         className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative overflow-hidden"
-        style={{ background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 60%, #0F172A 100%)' }}
+        style={{ 
+          background: 'linear-gradient(rgba(15, 23, 42, 0.85), rgba(15, 23, 42, 0.7)), url("https://www.flickr.com/photo_download.gne?size=z&id=55157560124&secret=8c8ef61066")',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
       >
         {/* Background glow effects */}
         <div
@@ -128,7 +132,7 @@ const Login: React.FC = () => {
             </div>
             <div>
               <p className="text-2xl font-bold text-white tracking-tight">SiSPPD</p>
-              <p className="text-xs font-medium" style={{ color: '#94A3B8' }}>
+              <p className="text-xs font-medium" style={{ color: '#CBD5E1' }}>
                 v2.1 — Mamberamo Raya
               </p>
             </div>
@@ -155,13 +159,14 @@ const Login: React.FC = () => {
                   style={{
                     width: 36,
                     height: 36,
-                    background: 'rgba(37,99,235,0.15)',
-                    border: '1px solid rgba(37,99,235,0.25)',
+                    background: 'rgba(255, 255, 255, 0.15)',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    backdropFilter: 'blur(8px)',
                   }}
                 >
-                  <Icon size={16} color="#2563EB" />
+                  <Icon size={16} color="white" />
                 </div>
-                <span className="text-sm font-medium" style={{ color: '#CBD5E1' }}>
+                <span className="text-sm font-medium" style={{ color: '#F1F5F9' }}>
                   {label}
                 </span>
               </div>
@@ -173,15 +178,15 @@ const Login: React.FC = () => {
         <div className="relative z-10">
           <div
             className="border-t pt-6"
-            style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+            style={{ borderColor: 'rgba(255,255,255,0.12)' }}
           >
-            <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: '#475569' }}>
+            <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: '#94A3B8' }}>
               Dikembangkan Oleh
             </p>
-            <p className="text-sm font-bold" style={{ color: '#94A3B8' }}>
+            <p className="text-sm font-bold" style={{ color: '#CBD5E1' }}>
               Bidang Pendapatan BPPKAD Mamberamo Raya
             </p>
-            <p className="text-xs mt-1" style={{ color: '#475569' }}>
+            <p className="text-xs mt-1" style={{ color: '#64748B' }}>
               &copy; {new Date().getFullYear()} SiSPPD. All rights reserved.
             </p>
           </div>

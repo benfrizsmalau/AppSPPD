@@ -77,25 +77,33 @@ const KopBupati: React.FC<{ instansi: Instansi | null | undefined }> = ({ instan
     ?? (instansi?.kabupaten_kota ? `BUPATI ${instansi.kabupaten_kota.toUpperCase()}` : 'BUPATI');
   const alamat = instansi?.alamat_bupati ?? instansi?.alamat;
   const telepon = instansi?.telepon_bupati ?? instansi?.telepon;
-  // Garuda → logo kabupaten sebagai fallback
   const logoKiri = instansi?.logo_garuda_path ?? instansi?.logo_kabupaten_path;
+
   return (
-    <div style={{ display: 'flex', alignItems: 'stretch', borderBottom, paddingBottom: '4px', marginBottom: '8px' }}>
-      <div style={{ width: '85px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'center', 
+      borderBottom, 
+      paddingBottom: '8px', 
+      marginBottom: '12px',
+      ...kopFont 
+    }}>
+      {/* Logo di Atas-Tengah */}
+      <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'center' }}>
         {logoKiri && (
-          <img src={logoKiri} alt="Logo" style={{ width: '75px', height: 'auto', objectFit: 'contain' }} />
+          <img src={logoKiri} alt="Logo" style={{ width: '100px', height: 'auto', objectFit: 'contain' }} />
         )}
       </div>
-      <div style={{ flex: 1, textAlign: 'center', padding: '0 8px', ...kopFont }}>
-        <p style={{ margin: 0, fontSize: '16pt', fontWeight: 'bold', lineHeight: 1.2, letterSpacing: '1px' }}>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ margin: 0, fontSize: '18pt', fontWeight: 'bold', lineHeight: 1.2, letterSpacing: '1.2px' }}>
           {jabatan}
         </p>
-        {alamat && <p style={{ margin: '3px 0 0', fontSize: '9pt', lineHeight: 1.3, color: '#333' }}>{alamat}</p>}
+        {alamat && <p style={{ margin: '3px 0 0', fontSize: '9.5pt', lineHeight: 1.3, color: '#333' }}>{alamat}</p>}
         {telepon && (
-          <p style={{ margin: 0, fontSize: '8pt', color: '#444' }}>Telp. {telepon}</p>
+          <p style={{ margin: 0, fontSize: '9pt', color: '#444' }}>Telp. {telepon}</p>
         )}
       </div>
-      <div style={{ width: '85px' }} /> {/* spacer agar teks center seimbang */}
     </div>
   );
 };
