@@ -371,7 +371,12 @@ const SPPDDocumentPage1: React.FC<{ data: SPPD }> = ({ data }) => {
         }}>
           <tbody>
             {[
-              { num: '1.', label: 'Pejabat Yang Memberi Perintah', value: (data as any).pejabat_pemberi_perintah?.jabatan || data.penandatangan?.jabatan || '—' },
+              { num: '1.', label: 'Pejabat Yang Memberi Perintah', value: (() => {
+                const p = (data as any).pejabat_pemberi_perintah;
+                if (p) return p.jabatan ?? '—';
+                // Fallback jika pejabat_pemberi_perintah belum diisi: tampilkan penandatangan
+                return data.penandatangan?.jabatan ?? '—';
+              })() },
               { num: '2.', label: 'Nama/NIP Pegawai yang Diperintah', value: (
                 <><strong>{formatNamaLengkap(data.pegawai)}</strong><br />NIP. {data.pegawai?.nip}</>
               )},
@@ -507,11 +512,11 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
                   <tr><td /><td style={{ padding: '2px 0' }}>Ke</td><td style={{ padding: '2px 8px' }}>: {data.tempat_tujuan}</td></tr>
                   <tr><td /><td style={{ padding: '2px 0' }}>Pada tanggal</td><td style={{ padding: '2px 8px' }}>: {fmtDate(data.tanggal_berangkat)}</td></tr>
                   <tr><td /><td style={{ padding: '2px 0' }}>Kepala</td><td style={{ padding: '2px 8px' }}>: {data.instansi?.nama_singkat}</td></tr>
+                  {/* Section I ditandatangani oleh Sekretaris Dinas / Pejabat Eselon III —
+                      bukan Kepala Dinas itu sendiri. Kolom dikosongkan untuk diisi manual. */}
                   <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
                   <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>
-                    <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
-                    {(data.penandatangan as any)?.ref_pangkat?.nama}
-                    {data.penandatangan?.nip ? <><br />NIP. {data.penandatangan.nip}</> : null}
+                    ( …………………………………… )
                   </td></tr>
                 </tbody>
               </table>
@@ -576,11 +581,12 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
           {/* Row IV */}
           <tr>
             <td style={{ border: '1px solid #000', padding: 0, verticalAlign: 'top' }}>
+              {/* Kolom kiri: ditandatangani Kepala Dinas selaku PA (penandatangan utama SPPD) */}
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <tbody>
                   <tr><td style={{ padding: '5px 8px', fontWeight: 'bold', width: '24px' }}>IV.</td><td style={{ padding: '5px 0' }}>Tiba kembali di</td><td style={{ padding: '5px 8px' }}>: {data.tempat_berangkat}</td></tr>
                   <tr><td /><td style={{ padding: '2px 0' }}>Pada tanggal</td><td style={{ padding: '2px 8px' }}>: {fmtDate(data.tanggal_kembali)}</td></tr>
-                  <tr><td /><td colSpan={2} style={{ padding: '4px 8px', textAlign: 'center', fontWeight: 'bold' }}>{data.penandatangan?.jabatan ?? 'Pejabat Pembuat Komitmen'}:</td></tr>
+                  <tr><td /><td colSpan={2} style={{ padding: '4px 8px', textAlign: 'center', fontWeight: 'bold' }}>{data.penandatangan?.jabatan ?? 'Pengguna Anggaran'}:</td></tr>
                   <tr style={{ height: '70px' }}><td /><td colSpan={2} /></tr>
                   <tr><td /><td colSpan={2} style={{ textAlign: 'center' }}>
                     <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
@@ -591,14 +597,20 @@ const SPPDDocumentPage2: React.FC<{ data: SPPD }> = ({ data }) => {
               </table>
             </td>
             <td style={{ border: '1px solid #000', padding: '10px', verticalAlign: 'top', fontSize: '9.5pt' }}>
+              {/* Kolom kanan: "Telah diperiksa" ditandatangani Pejabat Pemberi Perintah (Sekda/Asisten Sekda) */}
               <p>Telah diperiksa, dengan keterangan bahwa perjalanan tersebut di atas benar dilakukan atas perintahnya dan semata-mata untuk kepentingan jabatan dalam waktu yang sesingkat-singkatnya.</p>
               <div style={{ marginTop: '16px', textAlign: 'center' }}>
-                <p style={{ fontWeight: 'bold' }}>{data.penandatangan?.jabatan ?? 'Pejabat Pembuat Komitmen'}:</p>
+                <p style={{ fontWeight: 'bold' }}>
+                  {(data as any).pejabat_pemberi_perintah?.jabatan ?? data.penandatangan?.jabatan ?? 'Pejabat Yang Memberi Perintah'}:
+                </p>
                 <div style={{ height: '70px' }} />
                 <p>
-                  <strong><u>{formatNamaLengkap(data.penandatangan)}</u></strong><br />
-                  {(data.penandatangan as any)?.ref_pangkat?.nama}
-                  {data.penandatangan?.nip ? <><br />NIP. {data.penandatangan.nip}</> : null}
+                  <strong><u>{formatNamaLengkap((data as any).pejabat_pemberi_perintah ?? data.penandatangan)}</u></strong><br />
+                  {((data as any).pejabat_pemberi_perintah as any)?.ref_pangkat?.nama
+                    ?? (data.penandatangan as any)?.ref_pangkat?.nama}
+                  {((data as any).pejabat_pemberi_perintah?.nip ?? data.penandatangan?.nip)
+                    ? <><br />NIP. {(data as any).pejabat_pemberi_perintah?.nip ?? data.penandatangan?.nip}</>
+                    : null}
                 </p>
               </div>
             </td>
@@ -661,7 +673,7 @@ const DocumentRenderer: React.FC = () => {
             .from('sppd')
             .select(`
               *,
-              pejabat_pemberi_perintah:pejabat_pemberi_perintah_id(*),
+              pejabat_pemberi_perintah:pejabat_pemberi_perintah_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*)),
               instansi:instansi_id(*),
               penandatangan:penandatangan_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*)),
               pegawai:pegawai_id(*, ref_pangkat:pangkat_id(*), ref_golongan:golongan_id(*)),

@@ -147,6 +147,18 @@ const SPPDForm: React.FC = () => {
     enabled: !!tenantId,
   });
 
+  // Penandatangan yang menandatangani SPT — menjadi "Pejabat Pemberi Perintah" di kolom 1 SPPD
+  const { data: penandatanganSPTList = [] } = useQuery<Penandatangan[]>({
+    queryKey: ['penandatangan-spt', tenantId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('penandatangan')
+        .select('*').eq('tenant_id', tenantId!).eq('status_aktif', true);
+      if (error) throw error;
+      return (data as Penandatangan[]).filter(p => p.jenis_dokumen?.includes('SPT'));
+    },
+    enabled: !!tenantId,
+  });
+
   const { data: mataAnggaranList = [] } = useQuery<MataAnggaran[]>({
     queryKey: ['mata-anggaran', tenantId],
     queryFn: async () => {
@@ -246,7 +258,12 @@ const SPPDForm: React.FC = () => {
     setValue('maksud_perjalanan', s.tujuan_kegiatan?.join(', ') || '');
     setValue('lama_perjalanan', s.lama_kegiatan || 1);
     setValue('tanggal_berangkat', s.tanggal_penetapan); // Default to SPT date
-    
+
+    // Auto-fill pejabat pemberi perintah dari penandatangan SPT
+    if (s.penandatangan_id) {
+      setValue('pejabat_pemberi_perintah_id', s.penandatangan_id);
+    }
+
     // Default to first pegawai in SPT if any
     if (s.spt_pegawai && s.spt_pegawai.length > 0) {
       setValue('pegawai_id', s.spt_pegawai[0].pegawai_id);
@@ -627,15 +644,16 @@ const SPPDForm: React.FC = () => {
 
               <div className="form-group">
                 <label className="form-label">Pejabat Pemberi Perintah</label>
+                <p className="form-hint mb-1">Pejabat yang menandatangani SPT (Sekda/Bupati). Tampil di Kolom 1 SPPD.</p>
                 <Controller name="pejabat_pemberi_perintah_id" control={control} render={({ field }) => (
                   <select
                     className="form-select"
                     value={field.value ?? ''}
                     onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
                   >
-                    <option value="">Pilih Pejabat</option>
-                    {pegawaiList.map(p => (
-                      <option key={p.id} value={p.id}>{p.nama_lengkap} — {p.jabatan}</option>
+                    <option value="">-- Pilih Pejabat Pemberi Perintah --</option>
+                    {penandatanganSPTList.map(p => (
+                      <option key={p.id} value={p.id}>{p.jabatan} — {p.nama_lengkap}</option>
                     ))}
                   </select>
                 )} />
@@ -989,7 +1007,7 @@ const SPPDForm: React.FC = () => {
             <table className="w-full text-xs mb-4" style={{ borderCollapse: 'collapse' }}>
               <tbody>
                 {[
-                  ['Pejabat Yang Memberi Perintah', pegawaiList.find(p => p.id === watch('pejabat_pemberi_perintah_id'))?.jabatan ?? '—'],
+                  ['Pejabat Yang Memberi Perintah', (() => { const p = penandatanganSPTList.find(p => p.id === watch('pejabat_pemberi_perintah_id')); return p ? `${p.jabatan}` : '—'; })()],
                   ['Nama / NIP', previewPegawai ? `${previewPegawai.nama_lengkap} / ${previewPegawai.nip}` : '—'],
                   ['Jabatan', previewPegawai?.jabatan ?? '—'],
                   ['Tingkat Biaya Perjalanan', watch('tingkat_perjalanan') || '—'],

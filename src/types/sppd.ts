@@ -8,6 +8,7 @@ export interface SPPD {
     spt_id: number;
     pegawai_id: number;
     nomor_sppd: string;
+    /** FK → penandatangan(id). Pejabat yang menandatangani SPT (biasanya Sekda/Bupati). */
     pejabat_pemberi_perintah_id: number;
     tingkat_perjalanan: string;
     maksud_perjalanan: string;
@@ -42,7 +43,8 @@ export interface SPPD {
     // Joined data
     spt?: SPT;
     pegawai?: Pegawai;
-    pejabat_pemberi_perintah?: Pegawai;
+    /** Pejabat yang memberi perintah (kolom 1 SPPD) — dari tabel penandatangan, bukan pegawai. */
+    pejabat_pemberi_perintah?: Penandatangan;
     instansi?: Instansi;
     penandatangan?: Penandatangan;
     mata_anggaran_rel?: MataAnggaran;

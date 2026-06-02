@@ -694,7 +694,7 @@ const PegawaiList: React.FC = () => {
               <h3 className="modal-title">{editingId ? 'Edit Pegawai' : 'Tambah Pegawai Baru'}</h3>
               <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setModalOpen(false)}><X size={16} /></button>
             </div>
-            <form onSubmit={handleSubmit(v => saveMutation.mutate(v))}>
+            <form onSubmit={handleSubmit(v => saveMutation.mutate(v))} className="flex flex-col flex-1 min-h-0">
               <div className="modal-body flex flex-col gap-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="form-group">
