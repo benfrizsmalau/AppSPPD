@@ -345,7 +345,7 @@ export default function Onboarding() {
             updated_at: new Date().toISOString(),
           }).eq('id', existing.id);
         } else {
-          await supabase.from('setting_penomoran').insert(row);
+          await supabase.from('setting_penomoran').insert(row as any);
         }
       }
       await saveProgress(4);
