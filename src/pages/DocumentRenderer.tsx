@@ -850,7 +850,7 @@ const DocumentRenderer: React.FC = () => {
         @media print {
           .no-print { display: none !important; }
           .doc-preview-page { background: white !important; }
-          .scroll-area { padding: 0 !important; }
+          .scroll-area { padding: 0 !important; overflow: visible !important; }
           .print-container {
             box-shadow: none !important;
             border: none !important;
