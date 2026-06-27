@@ -450,15 +450,28 @@ const SPPDDocumentPage1: React.FC<{ data: SPPD }> = ({ data }) => {
               )},
               { num: '8.', label: 'Pengikut: Nama, Umur, Hub. Keluarga', value: (
                 pengikut.length === 0 ? '—' : (
-                  <ol style={{ margin: 0, paddingLeft: '14px', lineHeight: 1.5 }}>
-                    {pengikut.map((p, i) => (
-                      <li key={i}>
-                        {p.tipe === 'pegawai' && p.pegawai
-                          ? <>{formatNamaLengkap(p.pegawai)} — {p.pegawai.jabatan}</>
-                          : <>{p.nama ?? '—'}{p.umur ? `, ${p.umur} thn` : ''}{p.keterangan ? ` (${p.keterangan})` : ''}</>}
-                      </li>
-                    ))}
-                  </ol>
+                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                    <tbody>
+                      {pengikut.map((p, i) => (
+                        <tr key={i} style={{ verticalAlign: 'top' }}>
+                          {pengikut.length > 1 && (
+                            <td style={{ width: '18px', paddingRight: '2px', paddingBottom: '4px', verticalAlign: 'top' }}>{i + 1}.</td>
+                          )}
+                          <td style={{ paddingBottom: '4px', lineHeight: 1.4 }}>
+                            {p.tipe === 'pegawai' && p.pegawai ? (
+                              <>
+                                <strong>{formatNamaLengkap(p.pegawai)}</strong><br />
+                                NIP. {p.pegawai.nip || '—'}<br />
+                                {p.pegawai.jabatan}
+                              </>
+                            ) : (
+                              <>{p.nama ?? '—'}{p.umur ? `, ${p.umur} thn` : ''}{p.keterangan ? ` (${p.keterangan})` : ''}</>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 )
               )},
               { num: '9.', label: (<>Pembebanan Anggaran<br />a. Instansi<br />b. Mata Anggaran</>), value: (
