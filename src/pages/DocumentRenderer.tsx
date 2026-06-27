@@ -30,6 +30,21 @@ export function fmtDateRoman(d: string | null | undefined): string {
   } catch { return d ?? '—'; }
 }
 
+// ─── Terbilang (ID) ──────────────────────────────────────────────────────────
+const _SATUAN = ['','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan',
+  'sepuluh','sebelas','dua belas','tiga belas','empat belas','lima belas','enam belas',
+  'tujuh belas','delapan belas','sembilan belas'];
+const _PULUHAN = ['','','dua puluh','tiga puluh','empat puluh','lima puluh',
+  'enam puluh','tujuh puluh','delapan puluh','sembilan puluh'];
+function terbilang(n: number): string {
+  if (n < 20) return _SATUAN[n] ?? String(n);
+  const p = Math.floor(n / 10), s = n % 10;
+  return s === 0 ? _PULUHAN[p] : `${_PULUHAN[p]} ${_SATUAN[s]}`;
+}
+function toTitleCase(s: string): string {
+  return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
 // ─── KOP SURAT ────────────────────────────────────────────────────────────────
 // ─── Kop Surat — 3 Varian ────────────────────────────────────────────────────
 const borderBottom = '3.5px double #000';
@@ -293,36 +308,55 @@ const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
             <tr>
               <td style={{ verticalAlign: 'top' }}>Untuk :</td>
               <td>
-                {(data.tujuan_kegiatan ?? []).length > 1 ? (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <tbody>
-                      {(data.tujuan_kegiatan ?? []).map((t, i) => (
-                        <tr key={i}>
-                          <td style={{ width: '22px', verticalAlign: 'top', paddingBottom: '2px' }}>{i + 1}.</td>
-                          <td style={{ verticalAlign: 'top', paddingBottom: '2px' }}>{t}</td>
+                {(() => {
+                  const tujuan = data.tujuan_kegiatan ?? [];
+                  const baseIdx = tujuan.length;
+                  const tahun = data.tanggal_penetapan ? new Date(data.tanggal_penetapan).getFullYear() : new Date().getFullYear();
+                  const namaKabupaten = data.instansi?.kabupaten_kota
+                    ? toTitleCase(data.instansi.kabupaten_kota)
+                    : '—';
+                  const namaInstansi = data.instansi?.nama_lengkap ?? '';
+                  return (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <tbody>
+                        {tujuan.map((t, i) => (
+                          <tr key={i}>
+                            <td style={{ width: '22px', verticalAlign: 'top', paddingBottom: '3px' }}>{i + 1}.</td>
+                            <td style={{ verticalAlign: 'top', paddingBottom: '3px' }}>{t}</td>
+                          </tr>
+                        ))}
+                        {!!data.lama_kegiatan && (
+                          <tr>
+                            <td style={{ width: '22px', verticalAlign: 'top', paddingBottom: '3px' }}>{baseIdx + 1}.</td>
+                            <td style={{ verticalAlign: 'top', paddingBottom: '3px' }}>
+                              Lama pelaksanaan tugas selama {data.lama_kegiatan} ({terbilang(data.lama_kegiatan)}) hari, terhitung mulai tanggal {fmtDate(data.tanggal_penetapan)}
+                            </td>
+                          </tr>
+                        )}
+                        <tr>
+                          <td style={{ width: '22px', verticalAlign: 'top', paddingBottom: '3px' }}>{baseIdx + 2}.</td>
+                          <td style={{ verticalAlign: 'top', paddingBottom: '3px' }}>
+                            Setelah melaksanakan tugas, segera menyusun dan menyerahkan laporan hasil pelaksanaan tugas secara tertulis kepada Bupati {namaKabupaten}.
+                          </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <span>{(data.tujuan_kegiatan ?? [])[0] || '—'}</span>
-                )}
+                        <tr>
+                          <td style={{ width: '22px', verticalAlign: 'top', paddingBottom: '3px' }}>{baseIdx + 3}.</td>
+                          <td style={{ verticalAlign: 'top', paddingBottom: '3px' }}>
+                            Segala biaya yang timbul akibat pelaksanaan tugas ini dibebankan pada Dokumen Pelaksanaan Anggaran (DPA) {namaInstansi} Kabupaten {namaKabupaten} Tahun Anggaran {tahun}.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  );
+                })()}
               </td>
             </tr>
-            {data.lama_kegiatan && (
-              <tr>
-                <td style={{ verticalAlign: 'top', paddingTop: '6px' }}>Selama :</td>
-                <td style={{ paddingTop: '5px' }}>{data.lama_kegiatan} (hari)</td>
-              </tr>
-            )}
-            {data.pembebanan_anggaran && (
-              <tr>
-                <td style={{ verticalAlign: 'top', paddingTop: '6px' }}>Biaya :</td>
-                <td style={{ paddingTop: '6px' }}>Dibebankan pada {data.pembebanan_anggaran}</td>
-              </tr>
-            )}
           </tbody>
         </table>
+
+        <p style={{ margin: '14px 0 10px', fontFamily: '"Times New Roman", Times, serif', fontSize: '11.5pt' }}>
+          Melaksanakan perintah ini dengan saksama dan penuh rasa tanggung jawab.
+        </p>
 
         <SignatureBlock
           place={data.tempat_penetapan}
