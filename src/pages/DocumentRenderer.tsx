@@ -336,7 +336,22 @@ const SPTDocument: React.FC<{ data: SPT }> = ({ data }) => {
                         <tr>
                           <td style={{ width: '22px', verticalAlign: 'top', paddingBottom: '3px' }}>{baseIdx + 2}.</td>
                           <td style={{ verticalAlign: 'top', paddingBottom: '3px' }}>
-                            Setelah melaksanakan tugas, segera menyusun dan menyerahkan laporan hasil pelaksanaan tugas secara tertulis kepada Bupati {namaKabupaten}.
+                            {(() => {
+                              let penerima: string;
+                              const kop = data.kop_surat ?? 'skpd';
+                              if (kop === 'bupati') {
+                                penerima = data.instansi?.jabatan_kepala_daerah
+                                  ? toTitleCase(data.instansi.jabatan_kepala_daerah)
+                                  : `Bupati ${namaKabupaten}`;
+                              } else if (kop === 'sekda') {
+                                penerima = `Sekretaris Daerah Kabupaten ${namaKabupaten}`;
+                              } else {
+                                penerima = data.penandatangan?.jabatan
+                                  ? toTitleCase(data.penandatangan.jabatan)
+                                  : `Kepala ${namaInstansi}`;
+                              }
+                              return `Setelah melaksanakan tugas, segera menyusun dan menyerahkan laporan hasil pelaksanaan tugas secara tertulis kepada ${penerima}.`;
+                            })()}
                           </td>
                         </tr>
                         <tr>
