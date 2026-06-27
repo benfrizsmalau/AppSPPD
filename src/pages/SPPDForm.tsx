@@ -279,6 +279,27 @@ const SPPDForm: React.FC = () => {
   const watchedMaksud = watch('maksud_perjalanan');
   const watchedPenandatangan = watch('penandatangan_id');
   const watchedPengikut = watch('pengikut');
+  const watchedKopSurat = watch('kop_surat');
+
+  // Reset penandatangan_id when kop_surat changes (avoid mismatch)
+  const prevKopSurat = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (prevKopSurat.current !== null && prevKopSurat.current !== watchedKopSurat) {
+      setValue('penandatangan_id', null);
+    }
+    prevKopSurat.current = watchedKopSurat;
+  }, [watchedKopSurat, setValue]);
+
+  // Filter penandatangan sesuai kop surat yang dipilih
+  const JABATAN_BUPATI = ['bupati', 'walikota'];
+  const JABATAN_SEKDA = ['sekretaris daerah', 'sekda'];
+  const filteredPenandatanganSPPD = penandatanganList.filter(p => {
+    const jab = (p.jabatan || '').toLowerCase();
+    if (watchedKopSurat === 'bupati') return JABATAN_BUPATI.some(k => jab.includes(k));
+    if (watchedKopSurat === 'sekda') return JABATAN_SEKDA.some(k => jab.includes(k));
+    // kop skpd: exclude bupati/sekda level
+    return ![...JABATAN_BUPATI, ...JABATAN_SEKDA].some(k => jab.includes(k));
+  });
 
   const tanggalKembali = computeKembali(watchedBerangkat, watchedLama);
 
@@ -804,7 +825,8 @@ const SPPDForm: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Penandatangan</label>
+                <label className="form-label">Penandatangan SPPD</label>
+                <p className="form-hint mb-1">Pejabat yang menandatangani SPPD — harus sesuai kop surat yang dipilih.</p>
                 <Controller name="penandatangan_id" control={control} render={({ field }) => (
                   <select
                     className="form-select"
@@ -812,9 +834,12 @@ const SPPDForm: React.FC = () => {
                     onChange={e => field.onChange(e.target.value ? Number(e.target.value) : null)}
                   >
                     <option value="">-- Pilih Penandatangan --</option>
-                    {penandatanganList.map(p => (
+                    {filteredPenandatanganSPPD.map(p => (
                       <option key={p.id} value={p.id}>{p.nama_lengkap} — {p.jabatan}</option>
                     ))}
+                    {filteredPenandatanganSPPD.length === 0 && (
+                      <option value="" disabled>Belum ada penandatangan untuk kop ini</option>
+                    )}
                   </select>
                 )} />
               </div>
